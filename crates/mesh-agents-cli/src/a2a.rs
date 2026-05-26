@@ -1,6 +1,7 @@
 use std::future::Future;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::{anyhow, bail, Context, Result};
@@ -8,7 +9,7 @@ use axum::body::Body;
 use http_body_util::BodyExt;
 use mesh_agents_a2a::{
     agent_task_store_path, AgentDefinition, AgentRegistry, Artifact, JsonRpcId, JsonRpcRequest,
-    JsonRpcResponse, LocalAgentService, PersistentTaskStore, Task, TaskStore,
+    JsonRpcResponse, LocalAgentService, PersistentTaskStore, QueueMode, Task, TaskStore,
 };
 use mesh_agents_acp_bridge::AcpAgentExecutor;
 use rmcp::model::{
@@ -18,6 +19,7 @@ use rmcp::model::{
 use rmcp::service::{RequestContext, RoleServer};
 use rmcp::{ErrorData as McpError, ServerHandler, ServiceExt as McpServiceExt};
 use serde_json::{json, Map, Value};
+use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 use tower::ServiceExt as TowerServiceExt;
 
 #[cfg(test)]
@@ -109,6 +111,7 @@ struct LocalA2aTools {
     agents_dir: PathBuf,
     data_dir: PathBuf,
     executor_mode: ExecutorMode,
+    gates: AgentGates,
 }
 
 impl LocalA2aTools {
@@ -117,6 +120,7 @@ impl LocalA2aTools {
             agents_dir,
             data_dir,
             executor_mode,
+            gates: AgentGates::default(),
         }
     }
 
@@ -166,6 +170,7 @@ impl LocalA2aTools {
         let message = required_arg(&args, "message")?;
         let context_id = optional_arg(&args, "context_id");
         let agent = self.enabled_agent(agent_id)?;
+        let _permit = self.gates.acquire(&agent).await?;
         let response = self.post_send_message(&agent, message, context_id).await?;
         let result = response
             .result
@@ -289,6 +294,109 @@ impl LocalA2aTools {
 
     fn registry(&self) -> Result<AgentRegistry> {
         AgentRegistry::load_from_dir(&self.agents_dir)
+    }
+}
+
+#[derive(Clone, Debug, Default)]
+struct AgentGates {
+    gates: Arc<Mutex<std::collections::HashMap<String, Arc<AgentGate>>>>,
+}
+
+impl AgentGates {
+    async fn acquire(&self, agent: &AgentDefinition) -> Result<AgentGatePermit> {
+        let gate = self.gate_for(agent)?;
+        gate.acquire(agent).await
+    }
+
+    fn gate_for(&self, agent: &AgentDefinition) -> Result<Arc<AgentGate>> {
+        let limit = agent.runtime.runtime.max_concurrent_tasks.max(1);
+        let mut gates = self
+            .gates
+            .lock()
+            .map_err(|_| anyhow!("agent concurrency gate lock was poisoned"))?;
+        let gate = gates
+            .entry(agent.id.clone())
+            .or_insert_with(|| Arc::new(AgentGate::new(limit)));
+        if gate.limit == limit {
+            return Ok(gate.clone());
+        }
+
+        let gate = Arc::new(AgentGate::new(limit));
+        gates.insert(agent.id.clone(), gate.clone());
+        Ok(gate)
+    }
+}
+
+#[derive(Debug)]
+struct AgentGate {
+    limit: usize,
+    semaphore: Arc<Semaphore>,
+    queued: AtomicUsize,
+}
+
+impl AgentGate {
+    fn new(limit: usize) -> Self {
+        Self {
+            limit,
+            semaphore: Arc::new(Semaphore::new(limit)),
+            queued: AtomicUsize::new(0),
+        }
+    }
+
+    async fn acquire(&self, agent: &AgentDefinition) -> Result<AgentGatePermit> {
+        match agent.runtime.runtime.queue.mode {
+            QueueMode::Reject => self.try_acquire(agent),
+            QueueMode::Queue => self.acquire_queued(agent).await,
+        }
+    }
+
+    fn try_acquire(&self, agent: &AgentDefinition) -> Result<AgentGatePermit> {
+        self.semaphore
+            .clone()
+            .try_acquire_owned()
+            .map(|permit| AgentGatePermit { _permit: permit })
+            .map_err(|_| anyhow!("agent `{}` is at its concurrency limit", agent.id))
+    }
+
+    async fn acquire_queued(&self, agent: &AgentDefinition) -> Result<AgentGatePermit> {
+        let max_pending = agent.runtime.runtime.queue.max_pending_tasks;
+        if max_pending == 0 {
+            return self.try_acquire(agent);
+        }
+
+        let queued = self.queued.fetch_add(1, Ordering::SeqCst) + 1;
+        if queued > max_pending {
+            self.queued.fetch_sub(1, Ordering::SeqCst);
+            bail!(
+                "agent `{}` task queue is full; pending limit is {}",
+                agent.id,
+                max_pending
+            );
+        }
+        let queued_slot = QueuedSlot(&self.queued);
+
+        let permit = self
+            .semaphore
+            .clone()
+            .acquire_owned()
+            .await
+            .map(|permit| AgentGatePermit { _permit: permit })
+            .map_err(|_| anyhow!("agent `{}` concurrency gate was closed", agent.id));
+        drop(queued_slot);
+        permit
+    }
+}
+
+#[derive(Debug)]
+struct AgentGatePermit {
+    _permit: OwnedSemaphorePermit,
+}
+
+struct QueuedSlot<'a>(&'a AtomicUsize);
+
+impl Drop for QueuedSlot<'_> {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, Ordering::SeqCst);
     }
 }
 
@@ -520,6 +628,44 @@ mod tests {
         assert_eq!(result["agents"][0]["agent_id"], "enabled");
     }
 
+    #[tokio::test]
+    async fn reject_mode_denies_second_concurrent_task() {
+        let fixture = AgentFixture::new("reject-limit");
+        let mut agent = fixture.load_agent("reject-limit");
+        agent.runtime.runtime.queue.mode = QueueMode::Reject;
+        agent.runtime.runtime.max_concurrent_tasks = 1;
+        let gates = AgentGates::default();
+
+        let _first = gates.acquire(&agent).await.unwrap();
+        let error = gates.acquire(&agent).await.unwrap_err().to_string();
+
+        assert!(error.contains("concurrency limit"), "{error}");
+    }
+
+    #[tokio::test]
+    async fn queue_mode_rejects_when_pending_queue_is_full() {
+        let fixture = AgentFixture::new("queued-limit");
+        let mut agent = fixture.load_agent("queued-limit");
+        agent.runtime.runtime.queue.mode = QueueMode::Queue;
+        agent.runtime.runtime.queue.max_pending_tasks = 1;
+        agent.runtime.runtime.max_concurrent_tasks = 1;
+        let gates = AgentGates::default();
+
+        let first = gates.acquire(&agent).await.unwrap();
+        let waiting = tokio::spawn({
+            let gates = gates.clone();
+            let agent = agent.clone();
+            async move { gates.acquire(&agent).await }
+        });
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+
+        let error = gates.acquire(&agent).await.unwrap_err().to_string();
+        drop(first);
+        let _second = waiting.await.unwrap().unwrap();
+
+        assert!(error.contains("task queue is full"), "{error}");
+    }
+
     struct AgentFixture {
         root: PathBuf,
         agents_dir: PathBuf,
@@ -549,6 +695,14 @@ mod tests {
                 agents_dir,
                 data_dir,
             }
+        }
+
+        fn load_agent(&self, agent_id: &str) -> AgentDefinition {
+            AgentRegistry::load_from_dir(&self.agents_dir)
+                .unwrap()
+                .get(agent_id)
+                .unwrap()
+                .clone()
         }
     }
 

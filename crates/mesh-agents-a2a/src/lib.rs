@@ -19,8 +19,8 @@ pub use a2a_server::{
 };
 pub use registry::{
     AgentDefinition, AgentRegistry, AgentRuntimeConfig, InstructionDelivery, InstructionsConfig,
-    MeshToolsConfig, QueueConfig, RuntimeConfig, RuntimeKind, ToolConfig, ToolKind, ToolsConfig,
-    Visibility, WorkspaceConfig, WorkspaceKeep, WorkspaceMode,
+    MeshToolsConfig, QueueConfig, QueueMode, RuntimeConfig, RuntimeKind, ToolConfig, ToolKind,
+    ToolsConfig, Visibility, WorkspaceConfig, WorkspaceKeep, WorkspaceMode,
 };
 pub use service::{
     agent_task_store_path, local_jsonrpc_router, local_rest_router, EchoAgentExecutor,
