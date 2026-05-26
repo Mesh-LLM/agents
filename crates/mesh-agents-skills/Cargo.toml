@@ -1,0 +1,11 @@
+[package]
+name = "mesh-agents-skills"
+version.workspace = true
+edition = "2021"
+
+[lints]
+workspace = true
+
+[dependencies]
+anyhow.workspace = true
+serde.workspace = true
