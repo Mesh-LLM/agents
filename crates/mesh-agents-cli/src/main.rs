@@ -1,6 +1,7 @@
 mod a2a;
 mod agents;
 mod codex;
+mod plugin;
 
 use std::path::PathBuf;
 
@@ -164,6 +165,10 @@ pub(crate) enum SkillsCommand {
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    if std::env::var_os("MESH_LLM_PLUGIN_ENDPOINT").is_some() {
+        return plugin::run_plugin_from_env().await;
+    }
+
     let cli = Cli::parse();
     match cli.command {
         Command::Mcp {

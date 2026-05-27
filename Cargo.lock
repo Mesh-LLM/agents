@@ -1450,6 +1450,7 @@ dependencies = [
  "mesh-agents-a2a",
  "mesh-agents-acp-bridge",
  "mesh-agents-skills",
+ "mesh-llm-plugin",
  "rmcp",
  "serde",
  "serde_json",
@@ -1497,6 +1498,23 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "serde",
+]
+
+[[package]]
+name = "mesh-llm-plugin"
+version = "0.66.0"
+source = "git+https://github.com/Mesh-LLM/mesh-llm?rev=a9a9928bb02f4e72b149b369ff9b215e4d5cb55b#a9a9928bb02f4e72b149b369ff9b215e4d5cb55b"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "prost",
+ "prost-build",
+ "protoc-bin-vendored",
+ "rmcp",
+ "schemars 1.2.1",
+ "serde",
+ "serde_json",
+ "tokio",
 ]
 
 [[package]]
