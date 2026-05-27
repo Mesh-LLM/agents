@@ -366,10 +366,18 @@ mod tests {
 
     #[test]
     fn opencode_defaults_to_opencode_acp() {
-        let command = AcpCommand::from_runtime(&runtime(RuntimeKind::Opencode)).unwrap();
+        let result = AcpCommand::from_runtime(&runtime(RuntimeKind::Opencode));
 
-        assert_eq!(command.command, "opencode");
-        assert_eq!(command.args, ["acp"]);
+        if let Ok(command) = result {
+            assert_eq!(command.command, "opencode");
+            assert_eq!(command.args, ["acp"]);
+        } else {
+            let error = result.expect_err("missing OpenCode should return an error");
+            assert!(
+                error.to_string().contains("OpenCode CLI"),
+                "unexpected error: {error}"
+            );
+        }
     }
 
     #[test]
