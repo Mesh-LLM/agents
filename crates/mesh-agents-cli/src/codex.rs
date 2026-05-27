@@ -154,7 +154,7 @@ fn managed_mcp_config(mcp_command: &str) -> String {
     format!(
         r#"[mcp_servers.{MCP_SERVER_NAME}]
 command = "{mcp_command}"
-args = ["a2a", "mcp"]
+args = ["mcp"]
 enabled_tools = [
   "get_agents",
   "get_agent",

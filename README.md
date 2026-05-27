@@ -84,7 +84,7 @@ agents agents init pr-review --runtime opencode
 Run the A2A MCP server directly:
 
 ```bash
-agents a2a mcp
+agents mcp
 ```
 
 ## Client Model
@@ -106,7 +106,7 @@ Codex setup writes an MCP config block like:
 ```toml
 [mcp_servers.mesh_a2a]
 command = "agents"
-args = ["a2a", "mcp"]
+args = ["mcp"]
 enabled_tools = [
   "get_agents",
   "get_agent",
@@ -180,7 +180,7 @@ agents agents disable <agent-id>
 A2A and MCP:
 
 ```bash
-agents a2a mcp
+agents mcp
 ```
 
 Codex:

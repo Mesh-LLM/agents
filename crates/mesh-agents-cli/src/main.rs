@@ -8,7 +8,7 @@ use anyhow::Result;
 use clap::{Parser, Subcommand, ValueEnum};
 
 #[derive(Debug, Parser)]
-#[command(name = "mesh-agents")]
+#[command(name = "agents")]
 #[command(about = "Mesh-native A2A agents for mesh-llm clients")]
 struct Cli {
     #[command(subcommand)]
@@ -17,10 +17,14 @@ struct Cli {
 
 #[derive(Debug, Subcommand)]
 enum Command {
-    /// Run local A2A protocol surfaces.
-    A2a {
-        #[command(subcommand)]
-        command: A2aCommand,
+    /// Run the A2A MCP server over stdio.
+    Mcp {
+        /// Agents directory. Defaults to ~/.mesh-llm/agents.
+        #[arg(long)]
+        agents_dir: Option<PathBuf>,
+        /// mesh-llm data directory. Defaults to ~/.mesh-llm.
+        #[arg(long)]
+        data_dir: Option<PathBuf>,
     },
     /// Manage local agent definitions.
     Agents {
@@ -36,19 +40,6 @@ enum Command {
     Skills {
         #[command(subcommand)]
         command: SkillsCommand,
-    },
-}
-
-#[derive(Debug, Subcommand)]
-pub(crate) enum A2aCommand {
-    /// Run the local A2A MCP server over stdio.
-    Mcp {
-        /// Agents directory. Defaults to ~/.mesh-llm/agents.
-        #[arg(long)]
-        agents_dir: Option<PathBuf>,
-        /// mesh-llm data directory. Defaults to ~/.mesh-llm.
-        #[arg(long)]
-        data_dir: Option<PathBuf>,
     },
 }
 
@@ -175,7 +166,10 @@ pub(crate) enum SkillsCommand {
 async fn main() -> Result<()> {
     let cli = Cli::parse();
     match cli.command {
-        Command::A2a { command } => a2a::dispatch_a2a_command(&command).await,
+        Command::Mcp {
+            agents_dir,
+            data_dir,
+        } => a2a::run_a2a_mcp(agents_dir.as_deref(), data_dir.as_deref()).await,
         Command::Agents { command } => agents::dispatch_agents_command(&command),
         Command::Codex { command } => codex::dispatch_codex_command(&command),
         Command::Skills { command } => codex::dispatch_skills_command(&command),

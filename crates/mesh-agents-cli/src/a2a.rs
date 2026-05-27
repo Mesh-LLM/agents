@@ -25,18 +25,7 @@ use tower::ServiceExt as TowerServiceExt;
 #[cfg(test)]
 use mesh_agents_a2a::EchoAgentExecutor;
 
-use crate::A2aCommand;
-
-pub(crate) async fn dispatch_a2a_command(command: &A2aCommand) -> Result<()> {
-    match command {
-        A2aCommand::Mcp {
-            agents_dir,
-            data_dir,
-        } => run_a2a_mcp(agents_dir.as_deref(), data_dir.as_deref()).await,
-    }
-}
-
-async fn run_a2a_mcp(agents_dir: Option<&Path>, data_dir: Option<&Path>) -> Result<()> {
+pub(crate) async fn run_a2a_mcp(agents_dir: Option<&Path>, data_dir: Option<&Path>) -> Result<()> {
     let server = A2aMcpServer::new(LocalA2aTools::new(
         resolve_agents_dir(agents_dir)?,
         resolve_data_dir(data_dir)?,
