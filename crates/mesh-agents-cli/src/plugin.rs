@@ -127,6 +127,7 @@ fn build_plugin_with_command(
         ],
         events: [
             mesh_llm_plugin::events::peer_up(),
+            mesh_llm_plugin::events::peer_updated(),
             mesh_llm_plugin::events::local_accepting(),
             mesh_llm_plugin::events::mesh_id_updated(),
         ],
