@@ -351,7 +351,7 @@ mod tests {
             std::process::id()
         ));
         let _ = fs::remove_dir_all(&root);
-        fs::create_dir_all(&root).unwrap();
+        fs::create_dir_all(&root).expect("create temp task store directory");
         root.join("tasks.sqlite")
     }
 
@@ -386,14 +386,18 @@ mod tests {
     #[tokio::test]
     async fn persists_task_across_reopen() {
         let path = temp_path("persist");
-        let store = PersistentTaskStore::open(&path).unwrap();
+        let store = PersistentTaskStore::open(&path).expect("open test task store");
         store
             .create(task("task-1", "ctx-1", TaskState::Completed))
             .await
-            .unwrap();
+            .expect("create completed task");
 
-        let reopened = PersistentTaskStore::open(&path).unwrap();
-        let restored = reopened.get("task-1").await.unwrap().unwrap();
+        let reopened = PersistentTaskStore::open(&path).expect("reopen test task store");
+        let restored = reopened
+            .get("task-1")
+            .await
+            .expect("read restored task")
+            .expect("restored task should exist");
 
         assert_eq!(restored.context_id, "ctx-1");
         assert_eq!(restored.status.state, TaskState::Completed);
@@ -402,14 +406,18 @@ mod tests {
     #[tokio::test]
     async fn marks_active_tasks_failed_on_reopen() {
         let path = temp_path("recover");
-        let store = PersistentTaskStore::open(&path).unwrap();
+        let store = PersistentTaskStore::open(&path).expect("open test task store");
         store
             .create(task("task-1", "ctx-1", TaskState::Working))
             .await
-            .unwrap();
+            .expect("create working task");
 
-        let reopened = PersistentTaskStore::open(&path).unwrap();
-        let restored = reopened.get("task-1").await.unwrap().unwrap();
+        let reopened = PersistentTaskStore::open(&path).expect("reopen test task store");
+        let restored = reopened
+            .get("task-1")
+            .await
+            .expect("read restored task")
+            .expect("restored task should exist");
 
         assert_eq!(restored.status.state, TaskState::Failed);
         assert_eq!(
@@ -425,20 +433,20 @@ mod tests {
     #[tokio::test]
     async fn lists_with_filters_and_pagination() {
         let path = temp_path("list");
-        let store = PersistentTaskStore::open(&path).unwrap();
+        let store = PersistentTaskStore::open(&path).expect("open test task store");
         store
             .create(task("a", "ctx-1", TaskState::Completed))
             .await
-            .unwrap();
+            .expect("create first task");
         store
             .create(task("b", "ctx-2", TaskState::Completed))
             .await
-            .unwrap();
+            .expect("create second task");
 
         let mut req = list_request();
         req.context_id = Some("ctx-1".to_string());
         req.page_size = Some(1);
-        let page = store.list(&req).await.unwrap();
+        let page = store.list(&req).await.expect("list filtered tasks");
 
         assert_eq!(page.total_size, 1);
         assert_eq!(page.tasks[0].id, "a");

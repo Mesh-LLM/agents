@@ -411,13 +411,13 @@ mod tests {
         let root =
             std::env::temp_dir().join(format!("mesh-agents-a2a-{name}-{}", std::process::id()));
         let _ = fs::remove_dir_all(&root);
-        fs::create_dir_all(&root).unwrap();
+        fs::create_dir_all(&root).expect("create temp registry directory");
         root
     }
 
     fn write_minimal_agent(root: &Path, id: &str) -> PathBuf {
         let agent_dir = root.join(id);
-        fs::create_dir_all(&agent_dir).unwrap();
+        fs::create_dir_all(&agent_dir).expect("create test agent directory");
         fs::write(
             agent_dir.join(AGENT_CARD_FILE),
             r#"{
@@ -437,7 +437,7 @@ mod tests {
               "skills": []
             }"#,
         )
-        .unwrap();
+        .expect("write test agent card");
         fs::write(
             agent_dir.join(RUNTIME_FILE),
             r#"
@@ -461,7 +461,7 @@ type = "mcp"
 command = "github-mcp-server"
 "#,
         )
-        .unwrap();
+        .expect("write test runtime config");
         agent_dir
     }
 
@@ -470,14 +470,20 @@ command = "github-mcp-server"
         let root = temp_root("loads");
         let agent_dir = write_minimal_agent(&root, "pr-review");
 
-        let registry = AgentRegistry::load_from_dir(&root).unwrap();
+        let registry = AgentRegistry::load_from_dir(&root).expect("load test agent registry");
 
         assert_eq!(registry.agents().len(), 1);
-        let agent = registry.get("pr-review").unwrap();
+        let agent = registry.get("pr-review").expect("pr-review agent exists");
         assert_eq!(agent.id, "pr-review");
         assert_eq!(agent.runtime.runtime.max_concurrent_tasks, 2);
         assert_eq!(
-            agent.runtime.runtime.workspace.path.as_ref().unwrap(),
+            agent
+                .runtime
+                .runtime
+                .workspace
+                .path
+                .as_ref()
+                .expect("workspace path should be normalized"),
             &agent_dir.join("work")
         );
         assert_eq!(agent.runtime.tools.extra[0].name, "github");
@@ -486,9 +492,11 @@ command = "github-mcp-server"
     #[test]
     fn rejects_loose_json_cards() {
         let root = temp_root("loose");
-        fs::write(root.join("agent-card.json"), "{}").unwrap();
+        fs::write(root.join("agent-card.json"), "{}").expect("write loose agent card");
 
-        let error = AgentRegistry::load_from_dir(&root).unwrap_err().to_string();
+        let error = AgentRegistry::load_from_dir(&root)
+            .expect_err("loose card should be rejected")
+            .to_string();
 
         assert!(error.contains("loose Agent Card files are not supported"));
     }

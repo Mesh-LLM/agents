@@ -2,6 +2,9 @@
 name = "mesh-agents-skills"
 version.workspace = true
 edition = "2021"
+license.workspace = true
+description = "Skill install helpers for Mesh Agents"
+repository.workspace = true
 
 [lints]
 workspace = true

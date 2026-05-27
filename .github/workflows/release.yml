@@ -1,0 +1,95 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Release version, for example v0.1.0"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: linux-x86_64
+            os: ubuntu-latest
+            binary: mesh-agents
+            archive: mesh-agents-linux-x86_64.tar.gz
+            package: tar
+          - name: macos-aarch64
+            os: macos-14
+            binary: mesh-agents
+            archive: mesh-agents-macos-aarch64.tar.gz
+            package: tar
+          - name: windows-x86_64
+            os: windows-latest
+            binary: mesh-agents.exe
+            archive: mesh-agents-windows-x86_64.zip
+            package: zip
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust
+        uses: Swatinem/rust-cache@v2
+
+      - name: Build release binary
+        run: cargo build -p mesh-agents --release --locked
+
+      - name: Package Unix archive
+        if: matrix.package == 'tar'
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          cp "target/release/${{ matrix.binary }}" dist/
+          tar -czf "${{ matrix.archive }}" -C dist "${{ matrix.binary }}"
+
+      - name: Package Windows archive
+        if: matrix.package == 'zip'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path dist | Out-Null
+          Copy-Item "target/release/${{ matrix.binary }}" "dist/${{ matrix.binary }}"
+          Compress-Archive -Path "dist/${{ matrix.binary }}" -DestinationPath "${{ matrix.archive }}"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.archive }}
+          path: ${{ matrix.archive }}
+          if-no-files-found: error
+
+  publish:
+    name: Publish GitHub release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.event.inputs.version || github.ref_name }}
+          name: ${{ github.event.inputs.version || github.ref_name }}
+          files: artifacts/*
+          fail_on_unmatched_files: true

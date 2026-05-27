@@ -2,6 +2,9 @@
 name = "mesh-agents-acp-bridge"
 version.workspace = true
 edition = "2021"
+license.workspace = true
+description = "ACP harness bridge for Mesh Agents"
+repository.workspace = true
 
 [lints]
 workspace = true

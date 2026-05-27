@@ -3,6 +3,8 @@ name = "mesh-agents"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+description = "Mesh-native A2A agents plugin and MCP bridge for mesh-llm"
+repository.workspace = true
 
 [lints]
 workspace = true

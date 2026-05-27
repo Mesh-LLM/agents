@@ -342,6 +342,7 @@ pub enum BridgeTaskEvent {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
     use mesh_agents_a2a::{

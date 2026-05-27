@@ -2,6 +2,9 @@
 name = "mesh-agents-a2a"
 version.workspace = true
 edition = "2021"
+license.workspace = true
+description = "A2A registry, service, and SQLite task store for Mesh Agents"
+repository.workspace = true
 
 [lints]
 workspace = true

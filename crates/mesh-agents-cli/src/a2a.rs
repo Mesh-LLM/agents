@@ -60,6 +60,7 @@ impl A2aMcpServer {
     }
 }
 
+#[allow(clippy::manual_async_fn)]
 impl ServerHandler for A2aMcpServer {
     fn get_info(&self) -> ServerInfo {
         ServerInfo::new(ServerCapabilities::builder().enable_tools().build())
@@ -444,7 +445,7 @@ fn optional_arg<'a>(args: &'a Map<String, Value>, name: &str) -> Option<&'a str>
     args.get(name).and_then(Value::as_str)
 }
 
-fn artifact_args<'a>(args: &'a Map<String, Value>) -> Result<(&'a str, &'a str, &'a str)> {
+fn artifact_args(args: &Map<String, Value>) -> Result<(&str, &str, &str)> {
     Ok((
         required_arg(args, "agent_id")?,
         required_arg(args, "task_id")?,
@@ -553,6 +554,7 @@ fn home_dir() -> Result<PathBuf> {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
     use std::fs;

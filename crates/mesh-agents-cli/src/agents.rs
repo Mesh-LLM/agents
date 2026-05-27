@@ -334,6 +334,7 @@ fn validate_agent_id(agent_id: &str) -> Result<()> {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
 

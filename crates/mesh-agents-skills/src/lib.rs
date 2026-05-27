@@ -172,10 +172,10 @@ mod tests {
         let root =
             std::env::temp_dir().join(format!("mesh-agents-skills-missing-{}", std::process::id()));
         let _ = fs::remove_dir_all(&root);
-        fs::create_dir_all(&root).unwrap();
+        fs::create_dir_all(&root).expect("create temp skill directory");
 
         let error = SkillDescriptor::from_agent_dir("agent", &root)
-            .unwrap_err()
+            .expect_err("missing skill should be rejected")
             .to_string();
 
         assert!(error.contains("does not provide"));
@@ -187,10 +187,12 @@ mod tests {
             std::env::temp_dir().join(format!("mesh-agents-skills-present-{}", std::process::id()));
         let skill_dir = root.join(SKILL_DIR_NAME);
         let _ = fs::remove_dir_all(&root);
-        fs::create_dir_all(&skill_dir).unwrap();
-        fs::write(skill_dir.join(SKILL_FILE_NAME), "---\nname: test\n---\n").unwrap();
+        fs::create_dir_all(&skill_dir).expect("create source skill directory");
+        fs::write(skill_dir.join(SKILL_FILE_NAME), "---\nname: test\n---\n")
+            .expect("write source skill");
 
-        let descriptor = SkillDescriptor::from_agent_dir("pr-review", &root).unwrap();
+        let descriptor =
+            SkillDescriptor::from_agent_dir("pr-review", &root).expect("load skill descriptor");
         let plan = SkillInstallPlan::codex(descriptor, "/tmp/codex-skills", InstallMode::Copy);
 
         assert_eq!(
@@ -207,12 +209,14 @@ mod tests {
         let source = agent_dir.join(SKILL_DIR_NAME);
         let target = root.join("target");
         let _ = fs::remove_dir_all(&root);
-        fs::create_dir_all(&source).unwrap();
-        fs::write(source.join(SKILL_FILE_NAME), "---\nname: test\n---\n").unwrap();
+        fs::create_dir_all(&source).expect("create source skill directory");
+        fs::write(source.join(SKILL_FILE_NAME), "---\nname: test\n---\n")
+            .expect("write source skill");
 
-        let descriptor = SkillDescriptor::from_agent_dir("pr-review", &agent_dir).unwrap();
+        let descriptor = SkillDescriptor::from_agent_dir("pr-review", &agent_dir)
+            .expect("load skill descriptor");
         let plan = SkillInstallPlan::codex(descriptor, &target, InstallMode::Copy);
-        let result = install_skill(&plan, false).unwrap();
+        let result = install_skill(&plan, false).expect("install skill by copy");
 
         assert!(!result.replaced_existing);
         assert!(result.destination_dir.join(SKILL_FILE_NAME).is_file());

@@ -29,12 +29,10 @@ impl LocalAgentService {
         })
     }
 
-    #[must_use]
     pub fn jsonrpc_router(&self) -> axum::Router {
         a2a_server::jsonrpc::jsonrpc_router(self.handler.clone())
     }
 
-    #[must_use]
     pub fn rest_router(&self) -> axum::Router {
         a2a_server::rest::rest_router(self.handler.clone())
     }
@@ -136,7 +134,7 @@ mod tests {
     #[tokio::test]
     async fn jsonrpc_router_completes_and_persists_echo_task() {
         let path = temp_store_path("jsonrpc");
-        let store = PersistentTaskStore::open(&path).unwrap();
+        let store = PersistentTaskStore::open(&path).expect("open test task store");
         let app = local_jsonrpc_router(EchoAgentExecutor, store);
 
         let response = post_jsonrpc(
@@ -158,14 +156,19 @@ mod tests {
             response.error
         );
         let result: SendMessageResponse =
-            serde_json::from_value(response.result.expect("jsonrpc result")).unwrap();
+            serde_json::from_value(response.result.expect("jsonrpc result"))
+                .expect("decode send message response");
         let SendMessageResponse::Task(task) = result else {
             panic!("expected task response");
         };
         assert_eq!(task.status.state, TaskState::Completed);
 
-        let reopened = PersistentTaskStore::open(&path).unwrap();
-        let persisted = reopened.get(&task.id).await.unwrap().unwrap();
+        let reopened = PersistentTaskStore::open(&path).expect("reopen test task store");
+        let persisted = reopened
+            .get(&task.id)
+            .await
+            .expect("read persisted task")
+            .expect("persisted task should exist");
         assert_eq!(persisted.status.state, TaskState::Completed);
     }
 
@@ -175,16 +178,21 @@ mod tests {
         params: serde_json::Value,
     ) -> JsonRpcResponse {
         let request = JsonRpcRequest::new(JsonRpcId::Number(1), method, Some(params));
-        let body = serde_json::to_string(&request).unwrap();
+        let body = serde_json::to_string(&request).expect("serialize jsonrpc request");
         let request = axum::http::Request::builder()
             .uri("/")
             .method("POST")
             .header("content-type", "application/json")
             .body(Body::from(body))
-            .unwrap();
-        let response = app.oneshot(request).await.unwrap();
-        let body = response.into_body().collect().await.unwrap().to_bytes();
-        serde_json::from_slice(&body).unwrap()
+            .expect("build HTTP request");
+        let response = app.oneshot(request).await.expect("route jsonrpc request");
+        let body = response
+            .into_body()
+            .collect()
+            .await
+            .expect("collect jsonrpc response body")
+            .to_bytes();
+        serde_json::from_slice(&body).expect("decode jsonrpc response")
     }
 
     fn temp_store_path(name: &str) -> PathBuf {
@@ -193,7 +201,7 @@ mod tests {
             std::process::id()
         ));
         let _ = std::fs::remove_dir_all(&root);
-        std::fs::create_dir_all(&root).unwrap();
+        std::fs::create_dir_all(&root).expect("create temp task store directory");
         root.join("tasks.sqlite")
     }
 }

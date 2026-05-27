@@ -29,7 +29,23 @@ This repository currently implements the local foundation:
 
 Mesh-wide discovery and remote routing are planned next.
 
-## Quickstart
+## Install
+
+Install the released agents plugin binary through mesh-llm:
+
+```bash
+mesh-llm plugins install agents
+```
+
+If the catalog entry is not available yet, install directly from GitHub:
+
+```bash
+mesh-llm plugins install Mesh-LLM/agents
+```
+
+The installed command is `mesh-agents`.
+
+## Build
 
 Build the CLI:
 
@@ -37,28 +53,38 @@ Build the CLI:
 cargo build -p mesh-agents
 ```
 
-Create a local agent definition:
+Release builds publish native archives for Linux, macOS, and Windows from this
+repository's GitHub release workflow.
 
-```bash
-cargo run -p mesh-agents -- agents init pr-review --runtime opencode
-```
+## Configure
 
 Configure Codex:
 
 ```bash
-cargo run -p mesh-agents -- codex setup
+mesh-agents codex setup
 ```
 
 For development, preview the Codex changes without writing files:
 
 ```bash
-cargo run -p mesh-agents -- codex setup --dry-run
+mesh-agents codex setup --dry-run
+```
+
+Codex setup installs the generic `mesh-agents` skill and writes MCP config for
+the A2A client tools.
+
+## Quickstart
+
+Create a local agent definition:
+
+```bash
+mesh-agents agents init pr-review --runtime opencode
 ```
 
 Run the A2A MCP server directly:
 
 ```bash
-cargo run -p mesh-agents -- a2a mcp
+mesh-agents a2a mcp
 ```
 
 ## Client Model
@@ -173,6 +199,22 @@ mesh-agents skills uninstall mesh-agents
 mesh-agents skills status
 ```
 
+## Release
+
+Releases are built by GitHub Actions. Push a version tag:
+
+```bash
+git tag v0.1.0
+git push origin v0.1.0
+```
+
+Or run the `Release` workflow manually with a `v*` version. The workflow builds
+and uploads:
+
+- `mesh-agents-linux-x86_64.tar.gz`
+- `mesh-agents-macos-aarch64.tar.gz`
+- `mesh-agents-windows-x86_64.zip`
+
 ## Workspace
 
 ```text
@@ -195,8 +237,9 @@ Run checks:
 
 ```bash
 cargo fmt --all -- --check
-cargo check --workspace
-cargo test --workspace
+cargo clippy --workspace --all-targets --locked -- -D warnings
+cargo test --workspace --locked
+cargo build --workspace --locked
 ```
 
 The live OpenCode ACP tests are ignored by default because they require an
