@@ -43,7 +43,7 @@ If the catalog entry is not available yet, install directly from GitHub:
 mesh-llm plugins install Mesh-LLM/agents
 ```
 
-The installed command is `mesh-agents`.
+The installed plugin executable is `agents`.
 
 ## Build
 
@@ -61,13 +61,13 @@ repository's GitHub release workflow.
 Configure Codex:
 
 ```bash
-mesh-agents codex setup
+agents codex setup
 ```
 
 For development, preview the Codex changes without writing files:
 
 ```bash
-mesh-agents codex setup --dry-run
+agents codex setup --dry-run
 ```
 
 Codex setup installs the generic `mesh-agents` skill and writes MCP config for
@@ -78,13 +78,13 @@ the A2A client tools.
 Create a local agent definition:
 
 ```bash
-mesh-agents agents init pr-review --runtime opencode
+agents agents init pr-review --runtime opencode
 ```
 
 Run the A2A MCP server directly:
 
 ```bash
-mesh-agents a2a mcp
+agents a2a mcp
 ```
 
 ## Client Model
@@ -105,7 +105,7 @@ Codex setup writes an MCP config block like:
 
 ```toml
 [mcp_servers.mesh_a2a]
-command = "mesh-agents"
+command = "agents"
 args = ["a2a", "mcp"]
 enabled_tools = [
   "get_agents",
@@ -169,34 +169,34 @@ public_mesh = false
 Agent authoring:
 
 ```bash
-mesh-agents agents list
-mesh-agents agents init <agent-id> --runtime opencode
-mesh-agents agents validate [agent-id]
-mesh-agents agents show <agent-id>
-mesh-agents agents enable <agent-id>
-mesh-agents agents disable <agent-id>
+agents agents list
+agents agents init <agent-id> --runtime opencode
+agents agents validate [agent-id]
+agents agents show <agent-id>
+agents agents enable <agent-id>
+agents agents disable <agent-id>
 ```
 
 A2A and MCP:
 
 ```bash
-mesh-agents a2a mcp
+agents a2a mcp
 ```
 
 Codex:
 
 ```bash
-mesh-agents codex setup
-mesh-agents codex setup --dry-run
+agents codex setup
+agents codex setup --dry-run
 ```
 
 Low-level skill plumbing:
 
 ```bash
-mesh-agents skills list
-mesh-agents skills install mesh-agents
-mesh-agents skills uninstall mesh-agents
-mesh-agents skills status
+agents skills list
+agents skills install mesh-agents
+agents skills uninstall mesh-agents
+agents skills status
 ```
 
 ## Release
@@ -211,9 +211,12 @@ git push origin v0.1.0
 Or run the `Release` workflow manually with a `v*` version. The workflow builds
 and uploads:
 
-- `mesh-agents-linux-x86_64.tar.gz`
-- `mesh-agents-macos-aarch64.tar.gz`
-- `mesh-agents-windows-x86_64.zip`
+- `agents-x86_64-unknown-linux-gnu.tar.gz`
+- `agents-aarch64-apple-darwin.tar.gz`
+- `agents-x86_64-pc-windows-msvc.zip`
+
+Each archive is rooted under `agents/` and includes `plugin.toml`, the native
+`agents` executable, `README.md`, and `LICENSE`.
 
 ## Workspace
 

@@ -1,0 +1,7 @@
+name = "agents"
+description = "Mesh-native A2A agents, MCP tools, and ACP harness bridge for mesh-llm."
+repository = "https://github.com/Mesh-LLM/agents"
+license = "Apache-2.0"
+
+[runtime]
+command = "agents"

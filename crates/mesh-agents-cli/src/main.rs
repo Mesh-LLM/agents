@@ -132,7 +132,7 @@ pub(crate) enum CodexCommand {
         #[arg(long)]
         skills_dir: Option<PathBuf>,
         /// Command Codex should run for the A2A MCP server.
-        #[arg(long, default_value = "mesh-agents")]
+        #[arg(long, default_value = "agents")]
         mcp_command: String,
         /// Print changes instead of writing files.
         #[arg(long)]

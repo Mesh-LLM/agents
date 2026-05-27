@@ -24,18 +24,21 @@ jobs:
         include:
           - name: linux-x86_64
             os: ubuntu-latest
-            binary: mesh-agents
-            archive: mesh-agents-linux-x86_64.tar.gz
+            build_binary: agents
+            plugin_binary: agents
+            archive: agents-x86_64-unknown-linux-gnu.tar.gz
             package: tar
           - name: macos-aarch64
             os: macos-14
-            binary: mesh-agents
-            archive: mesh-agents-macos-aarch64.tar.gz
+            build_binary: agents
+            plugin_binary: agents
+            archive: agents-aarch64-apple-darwin.tar.gz
             package: tar
           - name: windows-x86_64
             os: windows-latest
-            binary: mesh-agents.exe
-            archive: mesh-agents-windows-x86_64.zip
+            build_binary: agents.exe
+            plugin_binary: agents.exe
+            archive: agents-x86_64-pc-windows-msvc.zip
             package: zip
 
     steps:
@@ -49,24 +52,26 @@ jobs:
         uses: Swatinem/rust-cache@v2
 
       - name: Build release binary
-        run: cargo build -p mesh-agents --release --locked
+        run: cargo build -p mesh-agents --bin agents --release --locked
 
       - name: Package Unix archive
         if: matrix.package == 'tar'
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p dist
-          cp "target/release/${{ matrix.binary }}" dist/
-          tar -czf "${{ matrix.archive }}" -C dist "${{ matrix.binary }}"
+          mkdir -p dist/agents
+          cp "target/release/${{ matrix.build_binary }}" "dist/agents/${{ matrix.plugin_binary }}"
+          cp plugin.toml README.md LICENSE dist/agents/
+          tar -czf "${{ matrix.archive }}" -C dist agents
 
       - name: Package Windows archive
         if: matrix.package == 'zip'
         shell: pwsh
         run: |
-          New-Item -ItemType Directory -Force -Path dist | Out-Null
-          Copy-Item "target/release/${{ matrix.binary }}" "dist/${{ matrix.binary }}"
-          Compress-Archive -Path "dist/${{ matrix.binary }}" -DestinationPath "${{ matrix.archive }}"
+          New-Item -ItemType Directory -Force -Path dist/agents | Out-Null
+          Copy-Item "target/release/${{ matrix.build_binary }}" "dist/agents/${{ matrix.plugin_binary }}"
+          Copy-Item plugin.toml, README.md, LICENSE dist/agents/
+          Compress-Archive -Path "dist/agents" -DestinationPath "${{ matrix.archive }}"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4

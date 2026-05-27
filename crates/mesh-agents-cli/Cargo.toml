@@ -10,7 +10,7 @@ repository.workspace = true
 workspace = true
 
 [[bin]]
-name = "mesh-agents"
+name = "agents"
 path = "src/main.rs"
 
 [dependencies]
