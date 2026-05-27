@@ -1452,6 +1452,7 @@ dependencies = [
  "mesh-agents-skills",
  "mesh-llm-plugin",
  "rmcp",
+ "schemars 1.2.1",
  "serde",
  "serde_json",
  "tokio",
@@ -1503,7 +1504,7 @@ dependencies = [
 [[package]]
 name = "mesh-llm-plugin"
 version = "0.66.0"
-source = "git+https://github.com/Mesh-LLM/mesh-llm?rev=a9a9928bb02f4e72b149b369ff9b215e4d5cb55b#a9a9928bb02f4e72b149b369ff9b215e4d5cb55b"
+source = "git+https://github.com/Mesh-LLM/mesh-llm?rev=6a0451a91#6a0451a91924cc4fce58cc845702efc92c1c7fda"
 dependencies = [
  "anyhow",
  "async-trait",

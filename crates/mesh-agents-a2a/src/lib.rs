@@ -8,6 +8,7 @@ mod registry;
 mod service;
 mod task_store;
 
+pub use a2a::jsonrpc::methods as jsonrpc_methods;
 pub use a2a::{
     A2AError, AgentCard, Artifact, JsonRpcId, JsonRpcRequest, JsonRpcResponse, ListTasksRequest,
     ListTasksResponse, Message, Part, Role, SendMessageResponse, StreamResponse, Task, TaskState,

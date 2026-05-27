@@ -1,6 +1,7 @@
 mod a2a;
 mod agents;
 mod codex;
+mod mesh;
 mod plugin;
 
 use std::path::PathBuf;

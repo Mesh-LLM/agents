@@ -22,6 +22,10 @@ use serde_json::{json, Map, Value};
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 use tower::ServiceExt as TowerServiceExt;
 
+use crate::mesh::{
+    local_agent_summaries, remote_agent_summaries, RemoteAgentCache, RemoteTaskCache,
+};
+
 #[cfg(test)]
 use mesh_agents_a2a::EchoAgentExecutor;
 
@@ -127,31 +131,42 @@ impl LocalA2aTools {
     }
 
     fn get_agents(&self) -> Result<Value> {
-        let registry = self.registry()?;
-        let agents = registry
-            .agents()
-            .iter()
-            .filter(|agent| agent.runtime.enabled)
-            .map(agent_summary)
-            .collect::<Vec<_>>();
+        let mut agents = local_agent_summaries(&self.agents_dir)?;
+        agents.extend(remote_agent_summaries(&self.data_dir)?);
         Ok(json!({ "agents": agents }))
     }
 
     fn get_agent(&self, agent_id: &str) -> Result<Value> {
-        let agent = self.enabled_agent(agent_id)?;
+        if let Some(agent) = self.registry()?.get(agent_id) {
+            if !agent.runtime.enabled {
+                bail!("agent `{agent_id}` is disabled");
+            }
+            return Ok(json!({
+                "agent_id": agent.id,
+                "location": "local",
+                "agent_card": agent.card,
+                "runtime": {
+                    "type": agent.runtime.runtime.kind,
+                    "max_concurrent_tasks": agent.runtime.runtime.max_concurrent_tasks,
+                    "workspace": agent.runtime.runtime.workspace,
+                },
+                "paths": {
+                    "dir": agent.dir,
+                    "agent_card": agent.card_path,
+                    "runtime_config": agent.runtime_path,
+                },
+            }));
+        }
+
+        let remote = RemoteAgentCache::load(&self.data_dir)?
+            .get(agent_id)
+            .cloned()
+            .with_context(|| format!("agent `{agent_id}` was not found"))?;
         Ok(json!({
-            "agent_id": agent.id,
-            "agent_card": agent.card,
-            "runtime": {
-                "type": agent.runtime.runtime.kind,
-                "max_concurrent_tasks": agent.runtime.runtime.max_concurrent_tasks,
-                "workspace": agent.runtime.runtime.workspace,
-            },
-            "paths": {
-                "dir": agent.dir,
-                "agent_card": agent.card_path,
-                "runtime_config": agent.runtime_path,
-            },
+            "agent_id": remote.agent_id,
+            "location": "remote",
+            "peer_id": remote.peer_id,
+            "agent_card": remote.card,
         }))
     }
 
@@ -246,7 +261,16 @@ impl LocalA2aTools {
     }
 
     async fn load_task(&self, agent_id: &str, task_id: &str) -> Result<Task> {
-        let _agent = self.enabled_agent(agent_id)?;
+        if self.enabled_agent(agent_id).is_err() {
+            let remote = RemoteTaskCache::load(&self.data_dir)?
+                .get(agent_id, task_id)
+                .cloned()
+                .with_context(|| {
+                    format!("remote task `{task_id}` was not found for agent `{agent_id}`")
+                })?;
+            return serde_json::from_value(remote.result)
+                .with_context(|| format!("failed to decode remote task `{task_id}`"));
+        }
         let path = agent_task_store_path(&self.data_dir, agent_id);
         let store = PersistentTaskStore::open(&path)
             .map_err(|error| anyhow!("failed to open task store {}: {error}", path.display()))?;
@@ -412,18 +436,6 @@ fn next_message_id() -> String {
     format!("mcp-{nanos}")
 }
 
-fn agent_summary(agent: &AgentDefinition) -> Value {
-    json!({
-        "agent_id": agent.id,
-        "name": agent.card.name,
-        "description": agent.card.description,
-        "version": agent.card.version,
-        "runtime": agent.runtime.runtime.kind,
-        "max_concurrent_tasks": agent.runtime.runtime.max_concurrent_tasks,
-        "card_url": format!("mesh://agents/{}", agent.id),
-    })
-}
-
 fn required_arg<'a>(args: &'a Map<String, Value>, name: &str) -> Result<&'a str> {
     args.get(name)
         .and_then(Value::as_str)
@@ -446,10 +458,14 @@ fn a2a_tools() -> Vec<Tool> {
     vec![
         tool(
             "get_agents",
-            "List local A2A agents that are enabled.",
+            "List local and mesh-discovered A2A agents that are enabled.",
             json!({}),
         ),
-        tool("get_agent", "Get one local A2A Agent Card.", agent_schema()),
+        tool(
+            "get_agent",
+            "Get one local or mesh-discovered A2A Agent Card.",
+            agent_schema(),
+        ),
         tool(
             "send_message",
             "Send a user message to a local A2A agent.",
