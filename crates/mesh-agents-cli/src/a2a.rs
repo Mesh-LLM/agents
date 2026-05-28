@@ -270,7 +270,7 @@ impl LocalA2aTools {
                 .with_context(|| {
                     format!("remote task `{task_id}` was not found for agent `{agent_id}`")
                 })?;
-            return serde_json::from_value(remote.result)
+            return decode_remote_task(remote.result)
                 .with_context(|| format!("failed to decode remote task `{task_id}`"));
         }
         let path = agent_task_store_path(&self.data_dir, agent_id);
@@ -311,6 +311,13 @@ impl LocalA2aTools {
     fn registry(&self) -> Result<AgentRegistry> {
         AgentRegistry::load_from_dir(&self.agents_dir)
     }
+}
+
+fn decode_remote_task(value: Value) -> Result<Task> {
+    if let Some(task) = value.get("task") {
+        return serde_json::from_value(task.clone()).context("failed to decode wrapped task");
+    }
+    serde_json::from_value(value).context("failed to decode task")
 }
 
 #[derive(Clone, Debug, Default)]

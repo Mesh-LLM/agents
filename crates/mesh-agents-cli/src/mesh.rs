@@ -137,22 +137,44 @@ impl RemoteTaskCache {
     }
 
     pub(crate) fn upsert(&mut self, task: RemoteTaskRecord) {
-        if let Some(existing) = self
-            .tasks
-            .iter_mut()
-            .find(|existing| existing.agent_id == task.agent_id && existing.task_id == task.task_id)
-        {
+        if let Some(existing) = self.tasks.iter_mut().find(|existing| {
+            existing.agent_id == task.agent_id
+                && (existing.task_id == task.task_id
+                    || same_nonempty(&existing.correlation_id, &task.correlation_id))
+        }) {
             *existing = task;
         } else {
             self.tasks.push(task);
         }
     }
 
-    pub(crate) fn get(&self, agent_id: &str, task_id: &str) -> Option<&RemoteTaskRecord> {
-        self.tasks
-            .iter()
-            .find(|task| task.agent_id == agent_id && task.task_id == task_id)
+    pub(crate) fn upsert_pending(
+        &mut self,
+        agent_id: String,
+        peer_id: String,
+        correlation_id: String,
+        result: Value,
+    ) {
+        self.upsert(RemoteTaskRecord {
+            agent_id,
+            task_id: correlation_id.clone(),
+            peer_id,
+            correlation_id,
+            result,
+            updated_at_ms: now_ms(),
+        });
     }
+
+    pub(crate) fn get(&self, agent_id: &str, task_id: &str) -> Option<&RemoteTaskRecord> {
+        self.tasks.iter().find(|task| {
+            task.agent_id == agent_id
+                && (task.task_id == task_id || same_nonempty(&task.correlation_id, task_id))
+        })
+    }
+}
+
+fn same_nonempty(left: &str, right: &str) -> bool {
+    !left.is_empty() && left == right
 }
 
 pub(crate) fn local_advertisements(
@@ -320,5 +342,54 @@ public_mesh = false
         assert_eq!(summaries.len(), 1);
         assert_eq!(summaries[0]["agent_id"], "private");
         assert_eq!(summaries[0]["location"], "local");
+    }
+
+    #[test]
+    fn remote_tasks_can_be_read_by_correlation_id() {
+        let mut cache = RemoteTaskCache::default();
+        cache.upsert(RemoteTaskRecord {
+            agent_id: "pr-review".to_string(),
+            task_id: "task-1".to_string(),
+            peer_id: "peer-a".to_string(),
+            correlation_id: "remote-1".to_string(),
+            result: json!({ "task": { "id": "task-1" } }),
+            updated_at_ms: 1,
+        });
+
+        let task = cache
+            .get("pr-review", "remote-1")
+            .expect("correlation id should resolve");
+
+        assert_eq!(task.task_id, "task-1");
+    }
+
+    #[test]
+    fn remote_task_response_replaces_pending_correlation_record() {
+        let mut cache = RemoteTaskCache::default();
+        cache.upsert_pending(
+            "pr-review".to_string(),
+            "peer-a".to_string(),
+            "remote-1".to_string(),
+            json!({ "task": { "id": "remote-1" } }),
+        );
+
+        cache.upsert(RemoteTaskRecord {
+            agent_id: "pr-review".to_string(),
+            task_id: "task-1".to_string(),
+            peer_id: "peer-a".to_string(),
+            correlation_id: "remote-1".to_string(),
+            result: json!({ "task": { "id": "task-1" } }),
+            updated_at_ms: 2,
+        });
+
+        assert_eq!(cache.tasks.len(), 1);
+        assert_eq!(
+            cache.get("pr-review", "remote-1").unwrap().task_id,
+            "task-1"
+        );
+        assert_eq!(
+            cache.get("pr-review", "task-1").unwrap().correlation_id,
+            "remote-1"
+        );
     }
 }

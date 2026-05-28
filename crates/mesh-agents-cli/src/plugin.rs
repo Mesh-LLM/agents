@@ -422,13 +422,24 @@ async fn plugin_send_message(
     )?;
     message.correlation_id = correlation_id.clone();
     context.send_channel_message(message).await?;
+    let result = pending_remote_task_result(&args.agent_id, &correlation_id, &remote.peer_id);
+    let mut cache = RemoteTaskCache::load(&state.data_dir)?;
+    cache.upsert_pending(
+        args.agent_id.clone(),
+        remote.peer_id.clone(),
+        correlation_id.clone(),
+        result.clone(),
+    );
+    cache.save(&state.data_dir)?;
     Ok(json!({
         "agent_id": args.agent_id,
         "location": "remote",
         "peer_id": remote.peer_id,
+        "task_id": correlation_id.clone(),
         "correlation_id": correlation_id,
         "status": "submitted",
-        "note": "remote task result will be available through agents.get_task after the owner node replies",
+        "result": result,
+        "note": "task_id is a followable pending task reference; agents.get_task will resolve it to the final A2A task after the owner node replies",
     }))
 }
 
@@ -449,6 +460,8 @@ async fn plugin_get_task(state: &PluginState, agent_id: &str, task_id: &str) -> 
         "agent_id": agent_id,
         "location": "remote",
         "peer_id": remote.peer_id,
+        "task_id": remote.task_id,
+        "correlation_id": remote.correlation_id,
         "task": remote.result,
     }))
 }
@@ -530,6 +543,24 @@ fn decode_task_value(value: Value) -> Result<Task> {
     serde_json::from_value(value).context("failed to decode task")
 }
 
+fn pending_remote_task_result(agent_id: &str, correlation_id: &str, peer_id: &str) -> Value {
+    json!({
+        "task": {
+            "id": correlation_id,
+            "contextId": correlation_id,
+            "status": {
+                "state": "TASK_STATE_SUBMITTED",
+            },
+            "metadata": {
+                "mesh_llm_pending_remote": true,
+                "agent_id": agent_id,
+                "peer_id": peer_id,
+                "correlation_id": correlation_id,
+            },
+        },
+    })
+}
+
 async fn send_remote_message_stream(
     state: &PluginState,
     remote: &crate::mesh::RemoteAgentAd,
@@ -537,6 +568,7 @@ async fn send_remote_message_stream(
     context: &mut PluginContext<'_>,
 ) -> Result<Value> {
     let stream_id = format!("a2a-{}-{}", args.agent_id, now_ms());
+    let correlation_id = format!("remote-{}", now_ms());
     let metadata = MeshStreamRequest::SendMessage {
         agent_id: args.agent_id.clone(),
         message: args.message.clone(),
@@ -552,7 +584,7 @@ async fn send_remote_message_stream(
             mode: mesh_llm_plugin::proto::StreamMode::EventStream as i32,
             bidirectional: false,
             content_type: Some("text/event-stream".to_string()),
-            correlation_id: Some(format!("remote-{}", now_ms())),
+            correlation_id: Some(correlation_id.clone()),
             metadata_json: Some(serde_json::to_string(&metadata)?),
             expected_bytes: None,
             idle_timeout_ms: Some(300_000),
@@ -579,7 +611,7 @@ async fn send_remote_message_stream(
             agent_id: args.agent_id.clone(),
             task_id: task_id.clone(),
             peer_id: remote.peer_id.clone(),
-            correlation_id: String::new(),
+            correlation_id: correlation_id.clone(),
             result: final_result.clone(),
             updated_at_ms: now_ms(),
         });
@@ -592,6 +624,7 @@ async fn send_remote_message_stream(
         "peer_id": remote.peer_id,
         "transport": "mesh_stream",
         "task_id": task_id,
+        "correlation_id": correlation_id,
         "result": final_result,
         "events": events,
     }))
