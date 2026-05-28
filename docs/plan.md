@@ -279,6 +279,35 @@ Requirements:
 - Failures are readable through `agents.get_task` and should include trigger context.
 - The first demo should use a local scheduled trigger, not external webhooks.
 
+Concrete demo path:
+
+Use `opencode-loopd` as the first autonomous trigger. It runs as a normal
+client-side harness loop, so it does not require a new Mesh admin surface or a
+plugin-owned scheduler before the demo is useful.
+
+```bash
+opencode-loopd --project . --every 5m --prompt-file loop-prompt.md
+```
+
+- `--project .` points the loop at the repository or workspace to monitor.
+- `--every 5m` gives a simple polling cadence for the demo.
+- `--prompt-file loop-prompt.md` contains the standing autonomous instruction.
+- OpenCode should have Mesh MCP configured through `mesh-llm opencode` or by
+  registering `http://127.0.0.1:3131/mcp`.
+- The loop prompt should ask for the outcome, not raw tool calls. For example:
+  "Check this repository for PRs ready for review. When one exists, use Mesh
+  MCP to find a pull request review agent, send the review task, and summarize
+  the findings artifact."
+
+This means the first autonomous demo is:
+
+```text
+opencode-loopd -> Mesh MCP discovery -> pr-review A2A task -> artifacts
+```
+
+Later Mesh-owned trigger support can adopt the same behavior internally:
+persist dedupe state, create normal A2A tasks, and use Mesh MCP for delegation.
+
 ## 12. Support Agents Calling Agents
 
 Agents should be able to call other agents through the same Mesh MCP tools that

@@ -521,6 +521,44 @@ The same pattern works for other agents such as `docs-maintainer`,
 flow. Mesh Agents handles A2A task state, runtime execution, and artifact
 persistence.
 
+## Autonomous Agents
+
+Autonomous agents should still use the same Mesh MCP and A2A surfaces as
+user-invoked agents. The difference is the trigger: instead of a developer
+typing "Code review this PR", a local loop notices work, prompts a coding
+harness, and lets that harness discover and call Mesh agents.
+
+A practical starting point is `opencode-loopd`. Run it from the project that
+should be monitored:
+
+```bash
+opencode-loopd --project . --every 5m --prompt-file loop-prompt.md
+```
+
+`--project .` scopes the loop to the current checkout, `--every 5m` controls
+the polling interval, and `--prompt-file loop-prompt.md` gives the loop its
+standing instructions. The OpenCode environment should already have Mesh MCP
+configured, either by launching through `mesh-llm opencode` or by registering
+Mesh's MCP endpoint directly:
+
+```text
+http://127.0.0.1:3131/mcp
+```
+
+For example, `loop-prompt.md` for the `pr-review` demo might say:
+
+```markdown
+Check this repository for pull requests that are ready for review. When a PR
+needs review, use Mesh MCP to find a suitable pull request review agent, send
+the review task, wait for completion, and summarize the findings artifact.
+Do not create duplicate reviews for the same PR.
+```
+
+This keeps autonomy out of the Mesh Agents admin surface. Mesh does not need a
+separate scheduler to make the first demo useful: the loop is just another MCP
+client. It discovers agents, sends A2A tasks, polls task state, and reads
+artifacts using the same tools a human-driven coding client would use.
+
 ## Developing
 
 Build the CLI:
