@@ -62,6 +62,7 @@ jobs:
           mkdir -p dist/agents
           cp "target/release/${{ matrix.build_binary }}" "dist/agents/${{ matrix.plugin_binary }}"
           cp plugin.toml README.md LICENSE dist/agents/
+          cp -R skills dist/agents/skills
           tar -czf "${{ matrix.archive }}" -C dist agents
 
       - name: Package Windows archive
@@ -71,6 +72,7 @@ jobs:
           New-Item -ItemType Directory -Force -Path dist/agents | Out-Null
           Copy-Item "target/release/${{ matrix.build_binary }}" "dist/agents/${{ matrix.plugin_binary }}"
           Copy-Item plugin.toml, README.md, LICENSE dist/agents/
+          Copy-Item skills "dist/agents/skills" -Recurse
           Compress-Archive -Path "dist/agents" -DestinationPath "${{ matrix.archive }}"
 
       - name: Upload artifact

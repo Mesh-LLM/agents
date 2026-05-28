@@ -1,10 +1,15 @@
 # Mesh Agents
 
-Mesh Agents turns a [mesh-llm](https://github.com/Mesh-LLM/mesh-llm) network
-into a shared cloud of useful [A2A](https://a2a-protocol.org/latest/specification/)
-agents. Instead of every developer hand-wiring the same local helpers, people
-can publish agents to the mesh, discover agents contributed by others, and run
-them with the inference, tools, and runtime capacity available across the mesh.
+Mesh Agents lets a [mesh-llm](https://github.com/Mesh-LLM/mesh-llm) node host
+and advertise useful [A2A](https://a2a-protocol.org/latest/specification/)
+agents. A mesh node is not itself an agent, and the whole mesh is not one giant
+agent. Instead, any node can publish one or more Agent Cards for agents it is
+willing to run.
+
+That makes the mesh a shared agent cloud. Instead of every developer
+hand-wiring the same local helpers, people can contribute agents to a private
+team mesh, discover agents contributed by others, and run them with the
+inference, tools, and runtime capacity available across the mesh.
 
 Codex, OpenCode, Goose, Claude, and other MCP-capable clients get one local MCP
 endpoint for finding agents, inspecting their native
@@ -13,8 +18,9 @@ sending tasks, and reading artifacts. The agent might run on your node, another
 node in a private team mesh, or eventually a public mesh. The client does not
 need to know where the agent lives.
 
-Agents are defined once for the mesh and surfaced through MCP. That makes them
-easy to share, easy to reuse, and independent of any one coding client.
+Agents are defined once on the node that owns them and surfaced through Mesh's
+MCP endpoint. That makes them easy to share, easy to reuse, and independent of
+any one coding client.
 
 This README uses a pull request reviewer named `pr-review` as the running
 example. It is a realistic coding agent: a developer asks for a GitHub PR
@@ -32,9 +38,54 @@ Mesh Agents provides:
 - persistent A2A task state backed by SQLite
 - an ACP bridge for local coding-agent harnesses such as OpenCode
 - CLI tools for authoring and validating local agent definitions
+- packaged Agent Skills for using and authoring Mesh agents from AI clients
 
 The local foundation is implemented today. Mesh-wide discovery and remote
 routing are the next layer.
+
+## FAQ
+
+### Is every mesh node an A2A agent?
+
+No. A mesh node can host zero, one, or many A2A agents. The node runs the Mesh
+Agents plugin, and the plugin advertises whichever local agent definitions are
+enabled by policy.
+
+### Is the whole mesh exposed as one A2A agent?
+
+No. The mesh is the discovery and routing fabric. Individual agents are exposed
+through their own A2A Agent Cards. Your client talks to the local Mesh MCP
+endpoint, Mesh finds the right agent, and A2A carries the task to that agent.
+
+### What does "defined once and surfaced through MCP" mean?
+
+You define an agent once under `~/.mesh-llm/agents/<agent-id>/` on the node
+that should run it. MCP-capable clients such as Codex, OpenCode, Goose, Claude,
+and Pi connect to Mesh's local MCP endpoint instead of each maintaining their
+own copy of the agent configuration.
+
+### Can I keep an agent private?
+
+Yes. Local agent definitions start private. `visibility = "private"` keeps the
+agent off public surfaces, `policy.advertise_on_mesh = false` prevents gossip
+to other nodes, and `policy.public_mesh = false` protects against accidental
+publication on a public mesh. Publish agents only when you intentionally want
+other mesh peers to discover and use them.
+
+### What if the agent has secret MCP connections?
+
+Keep that agent private unless you intentionally want other mesh peers to send
+it work. Secrets and private tool credentials stay on the node that owns the
+agent, but a published agent runs with that node's configured tools. Treat
+publishing as permission for other allowed peers to ask that agent to perform
+work.
+
+### How do MCP, A2A, and ACP fit together?
+
+- MCP is how the coding client talks to Mesh.
+- A2A is how Mesh describes and sends tasks to agents.
+- ACP is how a local A2A agent drives a coding harness such as OpenCode, Codex,
+  Goose, or Pi.
 
 ## Architecture
 
@@ -132,6 +183,17 @@ mesh-llm plugins install Mesh-LLM/agents
 ```
 
 After installation, run the plugin's user-facing CLI through `mesh-llm`.
+
+Released plugin archives include Agent Skills under `skills/`. Install the
+plugin skills into detected AI clients:
+
+```bash
+mesh-llm skills install
+```
+
+Agent launch commands such as `mesh-llm goose`, `mesh-llm pi`,
+`mesh-llm opencode`, and `mesh-llm claude` also install available plugin skills
+for that agent before starting the session.
 
 The normal MCP endpoint is hosted by the running mesh node. Launch a supported
 client through mesh-llm and the client is wired to the mesh MCP endpoint,
@@ -514,6 +576,10 @@ crates/mesh-agents-acp-bridge/
 
 crates/mesh-agents-cli/
   User-facing CLI and MCP stdio server.
+
+skills/
+  Agent Skills installed by mesh-llm for clients such as Goose, Pi, OpenCode,
+  Claude, and Codex.
 ```
 
 ## Releasing
@@ -533,4 +599,4 @@ and uploads:
 - `agents-x86_64-pc-windows-msvc.zip`
 
 Each archive is rooted under `agents/` and includes `plugin.toml`, the native
-`agents` executable, `README.md`, and `LICENSE`.
+`agents` executable, packaged `skills/`, `README.md`, and `LICENSE`.
