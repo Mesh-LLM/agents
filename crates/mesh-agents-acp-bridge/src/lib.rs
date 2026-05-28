@@ -26,6 +26,7 @@ impl AcpCommand {
         match runtime.kind {
             RuntimeKind::Opencode => opencode_command(runtime),
             RuntimeKind::Goose => goose_command(runtime),
+            RuntimeKind::Pi => pi_command(runtime),
             RuntimeKind::Acp => {
                 let Some(command) = runtime.command.clone() else {
                     bail!("runtime.type = \"acp\" requires command");
@@ -96,6 +97,30 @@ fn default_goose_args(_command: &str) -> Vec<String> {
     vec!["acp".to_string()]
 }
 
+fn pi_command(runtime: &RuntimeConfig) -> Result<AcpCommand> {
+    if let Some(command) = runtime.command.clone() {
+        let args = if runtime.args.is_empty() {
+            default_pi_args()
+        } else {
+            runtime.args.clone()
+        };
+        return Ok(AcpCommand { command, args });
+    }
+
+    if executable_on_path("pi") {
+        return Ok(AcpCommand {
+            command: "pi".to_string(),
+            args: default_pi_args(),
+        });
+    }
+
+    bail!("could not find Pi CLI `pi` on PATH")
+}
+
+fn default_pi_args() -> Vec<String> {
+    vec!["acp".to_string()]
+}
+
 fn executable_on_path(name: &str) -> bool {
     std::env::var_os("PATH")
         .is_some_and(|paths| std::env::split_paths(&paths).any(|path| path.join(name).is_file()))
@@ -104,12 +129,16 @@ fn executable_on_path(name: &str) -> bool {
 #[derive(Clone, Debug)]
 pub struct AcpAgentExecutor {
     agent: AgentDefinition,
+    data_dir: PathBuf,
 }
 
 impl AcpAgentExecutor {
     #[must_use]
-    pub fn new(agent: AgentDefinition) -> Self {
-        Self { agent }
+    pub fn new(agent: AgentDefinition, data_dir: impl Into<PathBuf>) -> Self {
+        Self {
+            agent,
+            data_dir: data_dir.into(),
+        }
     }
 }
 
@@ -119,8 +148,9 @@ impl AgentExecutor for AcpAgentExecutor {
         ctx: mesh_agents_a2a::ExecutorContext,
     ) -> BoxStream<'static, Result<StreamResponse, A2AError>> {
         let agent = self.agent.clone();
+        let data_dir = self.data_dir.clone();
         Box::pin(stream::once(async move {
-            let task = run_task(agent, ctx).await;
+            let task = run_task(agent, data_dir, ctx).await;
             Ok(StreamResponse::Task(task))
         }))
     }
@@ -145,7 +175,11 @@ impl AgentExecutor for AcpAgentExecutor {
     }
 }
 
-async fn run_task(agent: AgentDefinition, ctx: mesh_agents_a2a::ExecutorContext) -> Task {
+async fn run_task(
+    agent: AgentDefinition,
+    data_dir: PathBuf,
+    ctx: mesh_agents_a2a::ExecutorContext,
+) -> Task {
     let prompt = match task_prompt(&agent, ctx.message.as_ref()) {
         Ok(prompt) => prompt,
         Err(err) => return failed_task(ctx, err.to_string()),
@@ -154,19 +188,36 @@ async fn run_task(agent: AgentDefinition, ctx: mesh_agents_a2a::ExecutorContext)
         Ok(workspace) => workspace,
         Err(err) => return failed_task(ctx, err.to_string()),
     };
-    match run_acp_once(&agent.runtime.runtime, &workspace, prompt).await {
+    let task_paths = match task_runtime_paths(&data_dir, &agent.id, &ctx.task_id) {
+        Ok(paths) => paths,
+        Err(err) => return failed_task(ctx, err.to_string()),
+    };
+    if let Err(err) = std::fs::write(&task_paths.prompt_path, &prompt).with_context(|| {
+        format!(
+            "failed to write task prompt to {}",
+            task_paths.prompt_path.display()
+        )
+    }) {
+        return failed_task(ctx, err.to_string());
+    }
+    match run_acp_once(&agent, &workspace, &task_paths, prompt).await {
         Ok(output) => completed_task(ctx, output),
         Err(err) => failed_task(ctx, err.to_string()),
     }
 }
 
-async fn run_acp_once(runtime: &RuntimeConfig, workspace: &Path, prompt: String) -> Result<String> {
-    let agent = AcpAgent::from_args(acp_process_args(runtime)?)?;
+async fn run_acp_once(
+    agent: &AgentDefinition,
+    workspace: &Path,
+    task_paths: &TaskRuntimePaths,
+    prompt: String,
+) -> Result<String> {
+    let agent_process = AcpAgent::from_args(acp_process_args(agent, workspace, task_paths)?)?;
 
     Client
         .builder()
         .name("mesh-agents-a2a")
-        .connect_with(agent, async |connection| {
+        .connect_with(agent_process, async |connection| {
             connection
                 .send_request(agent_client_protocol::schema::InitializeRequest::new(
                     agent_client_protocol::schema::ProtocolVersion::V1,
@@ -189,7 +240,9 @@ async fn run_acp_once(runtime: &RuntimeConfig, workspace: &Path, prompt: String)
 
 #[cfg(test)]
 async fn initialize_acp_session_once(runtime: &RuntimeConfig, workspace: &Path) -> Result<()> {
-    let agent = AcpAgent::from_args(acp_process_args(runtime)?)?;
+    let test_agent = test_agent_for_runtime(runtime.clone());
+    let task_paths = test_task_runtime_paths();
+    let agent = AcpAgent::from_args(acp_process_args(&test_agent, workspace, &task_paths)?)?;
 
     Client
         .builder()
@@ -212,16 +265,280 @@ async fn initialize_acp_session_once(runtime: &RuntimeConfig, workspace: &Path) 
         .map_err(Into::into)
 }
 
-fn acp_process_args(runtime: &RuntimeConfig) -> Result<Vec<String>> {
+#[cfg(test)]
+fn test_agent_for_runtime(runtime: RuntimeConfig) -> AgentDefinition {
+    AgentDefinition {
+        id: "pr-review".to_string(),
+        dir: PathBuf::from("/tmp/pr-review"),
+        card_path: PathBuf::from("/tmp/pr-review/agent-card.json"),
+        runtime_path: PathBuf::from("/tmp/pr-review/runtime.toml"),
+        card: serde_json::from_value(serde_json::json!({
+            "name": "PR Review",
+            "description": "Reviews pull requests.",
+            "version": "1.0.0",
+            "supportedInterfaces": [],
+            "capabilities": {},
+            "defaultInputModes": ["text/plain"],
+            "defaultOutputModes": ["text/markdown"],
+            "skills": []
+        }))
+        .expect("test card is valid"),
+        runtime: mesh_agents_a2a::AgentRuntimeConfig {
+            runtime,
+            ..mesh_agents_a2a::AgentRuntimeConfig::default()
+        },
+    }
+}
+
+#[cfg(test)]
+fn test_task_runtime_paths() -> TaskRuntimePaths {
+    TaskRuntimePaths {
+        task_id: "task-1".to_string(),
+        data_dir: PathBuf::from("/tmp/mesh-data"),
+        prompt_path: PathBuf::from("/tmp/mesh-data/a2a/agents/pr-review/runtime/task-1/prompt.txt"),
+        artifacts_dir: PathBuf::from(
+            "/tmp/mesh-data/a2a/agents/pr-review/runtime/task-1/artifacts",
+        ),
+        logs_dir: PathBuf::from("/tmp/mesh-data/a2a/agents/pr-review/runtime/task-1/logs"),
+    }
+}
+
+fn acp_process_args(
+    agent: &AgentDefinition,
+    workspace: &Path,
+    task_paths: &TaskRuntimePaths,
+) -> Result<Vec<String>> {
+    let runtime = &agent.runtime.runtime;
     let command = AcpCommand::from_runtime(runtime)?;
+    let context = TemplateContext::new(agent, workspace, task_paths);
     let mut args = runtime
         .env
         .iter()
-        .map(|(key, value)| format!("{key}={value}"))
-        .collect::<Vec<_>>();
-    args.push(command.command);
-    args.extend(command.args);
+        .map(|(key, value)| Ok(format!("{key}={}", context.expand(value)?)))
+        .collect::<Result<Vec<_>>>()?;
+    args.push(context.expand(&command.command)?);
+    args.extend(
+        command
+            .args
+            .iter()
+            .map(|arg| context.expand(arg))
+            .collect::<Result<Vec<_>>>()?,
+    );
     Ok(args)
+}
+
+#[derive(Clone, Debug)]
+struct TaskRuntimePaths {
+    task_id: String,
+    data_dir: PathBuf,
+    prompt_path: PathBuf,
+    artifacts_dir: PathBuf,
+    logs_dir: PathBuf,
+}
+
+fn task_runtime_paths(
+    data_dir: impl AsRef<Path>,
+    agent_id: &str,
+    task_id: &str,
+) -> Result<TaskRuntimePaths> {
+    let root = data_dir
+        .as_ref()
+        .join("a2a")
+        .join("agents")
+        .join(sanitize_path_component(agent_id))
+        .join("runtime")
+        .join(sanitize_path_component(task_id));
+    let artifacts_dir = root.join("artifacts");
+    let logs_dir = root.join("logs");
+    std::fs::create_dir_all(&artifacts_dir)
+        .with_context(|| format!("failed to create {}", artifacts_dir.display()))?;
+    std::fs::create_dir_all(&logs_dir)
+        .with_context(|| format!("failed to create {}", logs_dir.display()))?;
+    Ok(TaskRuntimePaths {
+        task_id: task_id.to_string(),
+        data_dir: data_dir.as_ref().to_path_buf(),
+        prompt_path: root.join("prompt.txt"),
+        artifacts_dir,
+        logs_dir,
+    })
+}
+
+struct TemplateContext {
+    values: HashMap<&'static str, String>,
+}
+
+impl TemplateContext {
+    fn new(agent: &AgentDefinition, workspace: &Path, task_paths: &TaskRuntimePaths) -> Self {
+        let runtime = &agent.runtime.runtime;
+        let instructions_file = agent
+            .runtime
+            .instructions
+            .as_ref()
+            .and_then(|instructions| instructions.file.as_ref())
+            .map(path_to_string);
+        let instructions_dir = agent
+            .runtime
+            .instructions
+            .as_ref()
+            .and_then(|instructions| instructions.file.as_ref())
+            .and_then(|path| path.parent())
+            .map(path_to_string);
+        let mut values = HashMap::from([
+            ("agent.id", agent.id.clone()),
+            ("agent.name", agent.card.name.clone()),
+            ("agent.dir", path_to_string(&agent.dir)),
+            ("agent.card_path", path_to_string(&agent.card_path)),
+            ("agent.runtime_path", path_to_string(&agent.runtime_path)),
+            ("task.id", task_paths.task_id.clone()),
+            ("task.workspace", path_to_string(workspace)),
+            ("task.prompt_path", path_to_string(&task_paths.prompt_path)),
+            (
+                "task.artifacts_dir",
+                path_to_string(&task_paths.artifacts_dir),
+            ),
+            ("task.logs_dir", path_to_string(&task_paths.logs_dir)),
+            (
+                "mesh.mcp_url",
+                mesh_url("MESH_LLM_MCP_URL", "http://127.0.0.1:3131/mcp"),
+            ),
+            (
+                "mesh.api_url",
+                mesh_url("MESH_LLM_API_URL", "http://127.0.0.1:3131"),
+            ),
+            (
+                "mesh.openai_url",
+                mesh_url("MESH_LLM_OPENAI_URL", "http://127.0.0.1:9337/v1"),
+            ),
+            (
+                "mesh.model",
+                runtime.model.clone().unwrap_or_else(|| "auto".to_string()),
+            ),
+            ("mesh.data_dir", path_to_string(&task_paths.data_dir)),
+        ]);
+        if let Some(value) = instructions_file {
+            values.insert("instructions.file", value);
+        }
+        if let Some(value) = instructions_dir {
+            values.insert("instructions.dir", value);
+        }
+        Self { values }
+    }
+
+    fn expand(&self, value: &str) -> Result<String> {
+        let expanded = self.expand_mesh_templates(value)?;
+        expand_env_vars(&expanded)
+    }
+
+    fn expand_mesh_templates(&self, value: &str) -> Result<String> {
+        let mut output = String::with_capacity(value.len());
+        let mut rest = value;
+        while let Some(start) = rest.find("{{") {
+            output.push_str(&rest[..start]);
+            let after_start = &rest[start + 2..];
+            let Some(end) = after_start.find("}}") else {
+                bail!("unterminated template variable in `{value}`");
+            };
+            let key = after_start[..end].trim();
+            let replacement = self.template_value(key, value)?;
+            output.push_str(&replacement);
+            rest = &after_start[end + 2..];
+        }
+        output.push_str(rest);
+        Ok(output)
+    }
+
+    fn template_value(&self, key: &str, source: &str) -> Result<String> {
+        if let Some(name) = key.strip_prefix("env.") {
+            return std::env::var(name).with_context(|| {
+                format!("environment variable `{name}` used in `{source}` is not set")
+            });
+        }
+        self.values
+            .get(key)
+            .cloned()
+            .with_context(|| format!("unknown template variable `{{{{ {key} }}}}` in `{source}`"))
+    }
+}
+
+fn path_to_string(path: impl AsRef<Path>) -> String {
+    path.as_ref().display().to_string()
+}
+
+fn mesh_url(env_name: &str, default: &str) -> String {
+    std::env::var(env_name).unwrap_or_else(|_| default.to_string())
+}
+
+fn expand_env_vars(value: &str) -> Result<String> {
+    let mut output = String::with_capacity(value.len());
+    let chars = value.char_indices().collect::<Vec<_>>();
+    let mut index = 0;
+    while index < chars.len() {
+        let (byte_index, ch) = chars[index];
+        if ch != '$' {
+            output.push(ch);
+            index += 1;
+            continue;
+        }
+        let Some((_, next)) = chars.get(index + 1).copied() else {
+            output.push('$');
+            index += 1;
+            continue;
+        };
+        if next == '{' {
+            let name_start = index + 2;
+            let Some(end_index) = chars[name_start..]
+                .iter()
+                .position(|(_, candidate)| *candidate == '}')
+                .map(|position| name_start + position)
+            else {
+                bail!("unterminated environment variable in `{value}`");
+            };
+            let start_byte = chars[name_start].0;
+            let end_byte = chars[end_index].0;
+            let name = &value[start_byte..end_byte];
+            output.push_str(&env_value(name, value)?);
+            index = end_index + 1;
+            continue;
+        }
+        if is_env_name_start(next) {
+            let name_start = index + 1;
+            let mut name_end = name_start + 1;
+            while let Some((_, candidate)) = chars.get(name_end).copied() {
+                if !is_env_name_continue(candidate) {
+                    break;
+                }
+                name_end += 1;
+            }
+            let start_byte = chars[name_start].0;
+            let end_byte = chars
+                .get(name_end)
+                .map(|(position, _)| *position)
+                .unwrap_or(value.len());
+            let name = &value[start_byte..end_byte];
+            output.push_str(&env_value(name, value)?);
+            index = name_end;
+            continue;
+        }
+        output.push_str(&value[byte_index..chars[index + 1].0]);
+        index += 2;
+    }
+    Ok(output)
+}
+
+fn is_env_name_start(ch: char) -> bool {
+    ch == '_' || ch.is_ascii_alphabetic()
+}
+
+fn is_env_name_continue(ch: char) -> bool {
+    is_env_name_start(ch) || ch.is_ascii_digit()
+}
+
+fn env_value(name: &str, source: &str) -> Result<String> {
+    if name.is_empty() {
+        bail!("empty environment variable reference in `{source}`");
+    }
+    std::env::var(name)
+        .with_context(|| format!("environment variable `{name}` used in `{source}` is not set"))
 }
 
 fn task_prompt(agent: &AgentDefinition, message: Option<&Message>) -> Result<String> {
@@ -419,6 +736,17 @@ mod tests {
     }
 
     #[test]
+    fn pi_configured_command_defaults_to_acp() {
+        let mut runtime = runtime(RuntimeKind::Pi);
+        runtime.command = Some("pi".to_string());
+
+        let command = AcpCommand::from_runtime(&runtime).unwrap();
+
+        assert_eq!(command.command, "pi");
+        assert_eq!(command.args, ["acp"]);
+    }
+
+    #[test]
     fn acp_requires_command() {
         let error = AcpCommand::from_runtime(&runtime(RuntimeKind::Acp))
             .unwrap_err()
@@ -433,13 +761,80 @@ mod tests {
         runtime.command = Some("opencode".to_string());
         runtime.env.insert("GOOSE_PROVIDER".into(), "openai".into());
         runtime.env.insert("GOOSE_MODEL".into(), "mesh".into());
+        let agent = test_agent_for_runtime(runtime);
+        let paths = test_task_runtime_paths();
 
-        let args = acp_process_args(&runtime).unwrap();
+        let args = acp_process_args(&agent, Path::new("/tmp/workspace"), &paths).unwrap();
 
         assert_eq!(args[0], "GOOSE_MODEL=mesh");
         assert_eq!(args[1], "GOOSE_PROVIDER=openai");
         assert_eq!(args[2], "opencode");
         assert_eq!(args[3], "acp");
+    }
+
+    #[test]
+    fn acp_process_args_expand_runtime_templates_and_env() {
+        let root = temp_root("templates");
+        let instructions_path = root.join("instructions.md");
+        std::fs::write(&instructions_path, "Review carefully.").unwrap();
+        let mut runtime = runtime(RuntimeKind::Acp);
+        runtime.command = Some("{{ env.HOME }}/bin/harness".to_string());
+        runtime.args = vec![
+            "--agent".to_string(),
+            "{{ agent.id }}".to_string(),
+            "--cwd".to_string(),
+            "{{ task.workspace }}".to_string(),
+            "--prompt".to_string(),
+            "{{ task.prompt_path }}".to_string(),
+            "--mcp".to_string(),
+            "{{ mesh.mcp_url }}".to_string(),
+            "--config".to_string(),
+            "$HOME/.config/harness.toml".to_string(),
+        ];
+        runtime.env.insert(
+            "TASK_ARTIFACTS".to_string(),
+            "{{ task.artifacts_dir }}".to_string(),
+        );
+        runtime.model = Some("qwen3-coder".to_string());
+        let mut agent = test_agent_for_runtime(runtime);
+        agent.dir = root.join("pr-review");
+        agent.card_path = agent.dir.join("agent-card.json");
+        agent.runtime_path = agent.dir.join("runtime.toml");
+        agent.runtime.instructions = Some(InstructionsConfig {
+            file: Some(instructions_path.clone()),
+            delivery: InstructionDelivery::FirstPrompt,
+        });
+        let paths = TaskRuntimePaths {
+            task_id: "task-42".to_string(),
+            data_dir: root.join("data"),
+            prompt_path: root.join("data/a2a/agents/pr-review/runtime/task-42/prompt.txt"),
+            artifacts_dir: root.join("data/a2a/agents/pr-review/runtime/task-42/artifacts"),
+            logs_dir: root.join("data/a2a/agents/pr-review/runtime/task-42/logs"),
+        };
+
+        let args = acp_process_args(&agent, Path::new("/tmp/workspace"), &paths).unwrap();
+
+        assert_eq!(
+            args[0],
+            format!("TASK_ARTIFACTS={}", paths.artifacts_dir.display())
+        );
+        assert_eq!(
+            args[1],
+            format!("{}/bin/harness", std::env::var("HOME").unwrap())
+        );
+        let expected = vec![
+            "--agent".to_string(),
+            "pr-review".to_string(),
+            "--cwd".to_string(),
+            "/tmp/workspace".to_string(),
+            "--prompt".to_string(),
+            paths.prompt_path.display().to_string(),
+            "--mcp".to_string(),
+            "http://127.0.0.1:3131/mcp".to_string(),
+            "--config".to_string(),
+            format!("{}/.config/harness.toml", std::env::var("HOME").unwrap()),
+        ];
+        assert_eq!(&args[2..], expected.as_slice());
     }
 
     #[test]
@@ -496,11 +891,14 @@ mod tests {
     #[ignore = "requires an installed and configured OpenCode ACP agent with a reachable provider"]
     async fn live_opencode_acp_smoke() {
         let runtime = live_opencode_runtime();
+        let agent = test_agent_for_runtime(runtime);
+        let paths = test_task_runtime_paths();
         let output = tokio::time::timeout(
             std::time::Duration::from_secs(120),
             run_acp_once(
-                &runtime,
+                &agent,
                 &std::env::temp_dir(),
+                &paths,
                 "Reply with exactly: mesh-a2a-smoke".to_string(),
             ),
         )

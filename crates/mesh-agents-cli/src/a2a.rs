@@ -250,10 +250,12 @@ impl LocalA2aTools {
 
     fn local_service(&self, agent: AgentDefinition) -> Result<LocalAgentService> {
         match self.executor_mode {
-            ExecutorMode::Acp => {
-                LocalAgentService::new(agent.clone(), &self.data_dir, AcpAgentExecutor::new(agent))
-                    .map_err(|error| anyhow!("failed to create local A2A service: {error}"))
-            }
+            ExecutorMode::Acp => LocalAgentService::new(
+                agent.clone(),
+                &self.data_dir,
+                AcpAgentExecutor::new(agent, self.data_dir.clone()),
+            )
+            .map_err(|error| anyhow!("failed to create local A2A service: {error}")),
             #[cfg(test)]
             ExecutorMode::Echo => LocalAgentService::new(agent, &self.data_dir, EchoAgentExecutor)
                 .map_err(|error| anyhow!("failed to create local A2A service: {error}")),

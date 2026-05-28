@@ -265,9 +265,9 @@ Important fields:
 
 - `enabled`: controls whether Mesh loads the agent.
 - `visibility`: starts as `private`; use this to keep local agents off public surfaces.
-- `runtime.type`: selects the harness bridge. `opencode` runs through OpenCode
-  ACP defaults, `acp` lets you provide an explicit ACP command, and `remote`
-  describes an externally hosted A2A agent.
+- `runtime.type`: selects how the agent runs. `opencode`, `goose`, and `pi`
+  are named ACP presets. `acp` lets you provide an explicit ACP command.
+  `remote` describes an externally hosted A2A agent.
 - `runtime.max_concurrent_tasks`: caps simultaneous work for this agent. The
   default is `1`, which is safest for coding agents that mutate workspaces.
 - `runtime.workspace.mode`: controls where work runs. `temp_per_task` creates a
@@ -285,6 +285,82 @@ Important fields:
   other mesh nodes.
 - `policy.public_mesh`: protects against accidentally advertising private local
   agents on a public mesh.
+
+Named runtimes are just convenience presets over ACP. Use `type = "acp"` when
+you want full control over the command line:
+
+```toml
+[runtime]
+type = "acp"
+command = "$HOME/bin/my-agent-harness"
+args = [
+  "acp",
+  "--cwd", "{{ task.workspace }}",
+  "--mcp", "{{ mesh.mcp_url }}",
+  "--agent", "{{ agent.id }}",
+  "--instructions", "{{ instructions.file }}"
+]
+max_concurrent_tasks = 1
+
+[runtime.env]
+MESH_LLM_MCP_URL = "{{ mesh.mcp_url }}"
+MESH_AGENT_ID = "{{ agent.id }}"
+TASK_ARTIFACTS_DIR = "{{ task.artifacts_dir }}"
+```
+
+Substitutions are expanded when a task starts, because task-specific values do
+not exist until then. Expansion applies to `runtime.command`, every
+`runtime.args` item, and `runtime.env` values.
+
+Mesh template variables use `{{ ... }}`. Environment variables use `$HOME`,
+`${HOME}`, or `{{ env.HOME }}`. Missing variables are configuration errors.
+
+Useful substitutions:
+
+| Variable | Example value | Meaning |
+|---|---|---|
+| `{{ agent.id }}` | `pr-review` | Agent directory id. |
+| `{{ agent.name }}` | `Pr Review` | Human-readable Agent Card name. |
+| `{{ agent.dir }}` | `/Users/alice/.mesh-llm/agents/pr-review` | Agent definition directory. |
+| `{{ agent.card_path }}` | `/Users/alice/.mesh-llm/agents/pr-review/agent-card.json` | Native A2A Agent Card path. |
+| `{{ agent.runtime_path }}` | `/Users/alice/.mesh-llm/agents/pr-review/runtime.toml` | Local runtime policy path. |
+| `{{ task.id }}` | `task-01J8R2` | A2A task id. |
+| `{{ task.workspace }}` | `/var/folders/.../mesh-a2a-pr-review-task-01J8R2` | Workspace assigned to this task. |
+| `{{ task.prompt_path }}` | `/Users/alice/.mesh-llm/a2a/agents/pr-review/runtime/task-01J8R2/prompt.txt` | File containing the task prompt. |
+| `{{ task.artifacts_dir }}` | `/Users/alice/.mesh-llm/a2a/agents/pr-review/runtime/task-01J8R2/artifacts` | Directory for harness-written outputs. |
+| `{{ task.logs_dir }}` | `/Users/alice/.mesh-llm/a2a/agents/pr-review/runtime/task-01J8R2/logs` | Directory for harness logs. |
+| `{{ instructions.file }}` | `/Users/alice/.mesh-llm/agents/pr-review/instructions.md` | Resolved instruction file path. |
+| `{{ instructions.dir }}` | `/Users/alice/.mesh-llm/agents/pr-review` | Directory containing the instruction file. |
+| `{{ mesh.mcp_url }}` | `http://127.0.0.1:3131/mcp` | Mesh-hosted MCP endpoint. |
+| `{{ mesh.api_url }}` | `http://127.0.0.1:3131` | Mesh node API and console base URL. |
+| `{{ mesh.openai_url }}` | `http://127.0.0.1:9337/v1` | Mesh OpenAI-compatible inference endpoint. |
+| `{{ mesh.model }}` | `auto` | Runtime model value, or `auto` if unset. |
+| `{{ mesh.data_dir }}` | `/Users/alice/.mesh-llm` | Mesh data directory. |
+| `{{ env.HOME }}` | `/Users/alice` | Explicit environment lookup. |
+| `$HOME`, `${HOME}` | `/Users/alice` | Shell-style environment expansion. |
+
+For example, this config:
+
+```toml
+[runtime]
+type = "acp"
+command = "opencode"
+args = [
+  "acp",
+  "--cwd", "{{ task.workspace }}",
+  "--mcp", "{{ mesh.mcp_url }}",
+  "--instructions", "{{ instructions.file }}"
+]
+```
+
+might start the harness like this for a `pr-review` task:
+
+```bash
+opencode acp \
+  --cwd /var/folders/.../mesh-a2a-pr-review-task-01J8R2 \
+  --mcp http://127.0.0.1:3131/mcp \
+  --instructions /Users/alice/.mesh-llm/agents/pr-review/instructions.md
+```
 
 ### Instructions
 
@@ -391,30 +467,37 @@ installed and configured OpenCode ACP agent.
 
 ### Adding Runtime Support
 
-Runtime support is deliberately split between the public agent definition and
-the private harness bridge.
+Runtime support is deliberately split between the public Agent Card and the
+private harness bridge. A2A remains the public contract. ACP is how Mesh starts
+local coding harnesses.
 
-Most new coding runtimes should be integrated through ACP. If the runtime can
-serve an ACP-compatible stdio process, users can already configure it with the
-generic runtime:
+Most new coding runtimes should start with the generic ACP runtime. If the
+runtime can serve an ACP-compatible stdio process, users can configure it
+without a Mesh code change:
 
 ```toml
 [runtime]
 type = "acp"
 command = "my-agent-harness"
-args = ["acp"]
+args = [
+  "acp",
+  "--cwd", "{{ task.workspace }}",
+  "--mcp", "{{ mesh.mcp_url }}"
+]
 max_concurrent_tasks = 1
 ```
 
-Add a named runtime when Mesh should provide first-class defaults, for example
-`runtime.type = "my_harness"` without requiring every user to remember the
-command and ACP arguments. The usual code path is:
+Add a named runtime only when Mesh should provide a first-class preset, for
+example `runtime.type = "my_harness"` instead of asking every user to remember
+the command and ACP arguments. Named runtimes such as `opencode`, `goose`, and
+`pi` should still resolve to ACP command templates. The usual code path is:
 
 1. Add a `RuntimeKind` variant in `crates/mesh-agents-a2a/src/registry.rs`.
 2. Add the matching `AgentRuntimeArg` value in `crates/mesh-agents-cli/src/main.rs`.
 3. Teach `crates/mesh-agents-cli/src/agents.rs` how `mesh-llm agents init --runtime <name>` writes the starter `runtime.toml`.
-4. Add command resolution in `crates/mesh-agents-acp-bridge/src/lib.rs`, usually by mapping the new runtime to an ACP stdio command and default args.
-5. Add tests for default command selection, explicit `runtime.command` override behavior, and generated agent config.
+4. Add command resolution in `crates/mesh-agents-acp-bridge/src/lib.rs`, mapping the new runtime to an ACP stdio command and default args.
+5. Make sure the preset still runs through the same substitution path as `type = "acp"`.
+6. Add tests for default command selection, explicit `runtime.command` override behavior, substitutions, and generated agent config.
 
 Runtimes that are already full remote A2A services should not go through ACP.
 Use `runtime.type = "remote"` and let Mesh route to the external A2A endpoint

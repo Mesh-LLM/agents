@@ -99,6 +99,8 @@ pub(crate) enum AgentsCommand {
 #[derive(Clone, Copy, Debug, ValueEnum)]
 pub(crate) enum AgentRuntimeArg {
     Opencode,
+    Goose,
+    Pi,
     Acp,
     Remote,
 }

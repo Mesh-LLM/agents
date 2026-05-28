@@ -237,13 +237,15 @@ fn write_agent_card(agent_dir: &Path, agent_id: &str) -> Result<()> {
 fn write_runtime(agent_dir: &Path, runtime: AgentRuntimeArg) -> Result<()> {
     let runtime_type = match runtime {
         AgentRuntimeArg::Opencode => "opencode",
+        AgentRuntimeArg::Goose => "goose",
+        AgentRuntimeArg::Pi => "pi",
         AgentRuntimeArg::Acp => "acp",
         AgentRuntimeArg::Remote => "remote",
     };
     let runtime_command = match runtime {
         AgentRuntimeArg::Acp => "command = \"agent-command\"\nargs = [\"acp\"]\n",
         AgentRuntimeArg::Remote => "command = \"\"\n",
-        AgentRuntimeArg::Opencode => "",
+        AgentRuntimeArg::Opencode | AgentRuntimeArg::Goose | AgentRuntimeArg::Pi => "",
     };
     let raw = format!(
         r#"enabled = true

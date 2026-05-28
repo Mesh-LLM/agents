@@ -184,6 +184,7 @@ pub enum RuntimeKind {
     #[default]
     Opencode,
     Goose,
+    Pi,
     Acp,
     Remote,
 }

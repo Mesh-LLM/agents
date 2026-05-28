@@ -560,8 +560,12 @@ async fn execute_local_agent(
     message: &str,
     context_id: Option<&str>,
 ) -> Result<Value> {
-    let service = LocalAgentService::new(agent.clone(), data_dir, AcpAgentExecutor::new(agent))
-        .map_err(|error| anyhow!("failed to create local A2A service: {error}"))?;
+    let service = LocalAgentService::new(
+        agent.clone(),
+        data_dir,
+        AcpAgentExecutor::new(agent, data_dir.to_path_buf()),
+    )
+    .map_err(|error| anyhow!("failed to create local A2A service: {error}"))?;
     let body = serde_json::to_string(&send_message_request(message, context_id))?;
     let request = axum::http::Request::builder()
         .uri("/")
@@ -618,8 +622,12 @@ async fn stream_local_agent_response(
     context_id: Option<&str>,
     mut stream: mesh_llm_plugin::LocalStream,
 ) -> Result<()> {
-    let service = LocalAgentService::new(agent.clone(), data_dir, AcpAgentExecutor::new(agent))
-        .map_err(|error| anyhow!("failed to create local A2A service: {error}"))?;
+    let service = LocalAgentService::new(
+        agent.clone(),
+        data_dir,
+        AcpAgentExecutor::new(agent, data_dir.to_path_buf()),
+    )
+    .map_err(|error| anyhow!("failed to create local A2A service: {error}"))?;
     let body = serde_json::to_string(&send_streaming_message_request(message, context_id))?;
     let request = axum::http::Request::builder()
         .uri("/")
