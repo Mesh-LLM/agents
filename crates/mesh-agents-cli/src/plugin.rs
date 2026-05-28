@@ -311,14 +311,12 @@ async fn handle_channel_message(
                 },
             };
             let reply = MeshProtocolMessage::SendMessageResponse(response);
-            context
-                .send_json_channel(
-                    CHANNEL,
-                    message.source_peer_id,
-                    KIND_SEND_MESSAGE_RESPONSE,
-                    &reply,
-                )
-                .await
+            let message = mesh_llm_plugin::json_reply_channel_message(
+                &message,
+                KIND_SEND_MESSAGE_RESPONSE,
+                &reply,
+            )?;
+            context.send_channel_message(message).await
         }
         MeshProtocolMessage::SendMessageResponse(response) => {
             if let Some(error) = response.error {
@@ -416,21 +414,21 @@ async fn plugin_send_message(
         context_id: args.context_id,
     });
     let correlation_id = format!("remote-{}", now_ms());
-    context
-        .send_json_channel(
-            CHANNEL,
-            remote.peer_id.clone(),
-            KIND_SEND_MESSAGE_REQUEST,
-            &request,
-        )
-        .await?;
+    let mut message = mesh_llm_plugin::json_channel_message(
+        CHANNEL,
+        remote.peer_id.clone(),
+        KIND_SEND_MESSAGE_REQUEST,
+        &request,
+    )?;
+    message.correlation_id = correlation_id.clone();
+    context.send_channel_message(message).await?;
     Ok(json!({
         "agent_id": args.agent_id,
         "location": "remote",
         "peer_id": remote.peer_id,
         "correlation_id": correlation_id,
         "status": "submitted",
-        "note": "remote task result will be available through get_task after the owner node replies",
+        "note": "remote task result will be available through agents.get_task after the owner node replies",
     }))
 }
 

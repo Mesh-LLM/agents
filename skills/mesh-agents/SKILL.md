@@ -14,16 +14,16 @@ agent is installed in the local coding client. Discover agents dynamically.
 
 ## Workflow
 
-1. For delegatable tasks, call `get_agents` to list available mesh agents.
+1. For delegatable tasks, call `agents.get_agents` to list available mesh agents.
 2. Pick the best agent for the task. For pull request or code review requests,
    prefer agents advertising `github`, `code-review`, `pull-request`, or a
    matching review skill.
-3. If unsure, call `get_agent` to inspect the
+3. If unsure, call `agents.get_agent` to inspect the
    A2A Agent Card, skills, runtime summary, and output modes.
-4. Call `send_message` with a clear task brief and any required URLs, branch
+4. Call `agents.send_message` with a clear task brief and any required URLs, branch
    names, file paths, or constraints.
-5. Use `get_task` to check task status until completion.
-6. Use `view_text_artifact` or `view_data_artifact` to read returned artifacts.
+5. Use `agents.get_task` to check task status until completion.
+6. Use `agents.view_text_artifact` or `agents.view_data_artifact` to read returned artifacts.
 7. Summarize the agent result for the user and include any task or artifact ids
    that matter for follow-up.
 
@@ -52,6 +52,9 @@ which agents are available and what they advertise.
 
 - Use the Agent Card to understand what an agent can do.
 - Do not invent agent ids. Discover them.
+- Mesh's aggregate MCP endpoint prefixes tools by plugin name. If a client
+  exposes unprefixed aliases for this plugin, the workflow is the same, but
+  prefer the visible `agents.*` tools when they are present.
 - If no suitable agent is available, say that directly and continue locally.
 - Treat returned artifacts as the source of truth for the delegated task.
 - Mention that a mesh agent was used in the result summary; do not require the

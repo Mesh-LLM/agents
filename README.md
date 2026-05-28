@@ -468,19 +468,23 @@ Clients discover agents through MCP. In normal use, the MCP endpoint is
 MCP over HTTP, or use client launchers such as `mesh-llm opencode`,
 `mesh-llm goose`, `mesh-llm pi`, and `mesh-llm claude` to configure it for you.
 
-The MCP server exposes these tools:
+Mesh's hosted MCP endpoint is an aggregate endpoint, so tool names are prefixed
+by plugin name to avoid collisions with other plugins. The agents plugin exposes
+these tools through that endpoint:
 
 | Tool | Purpose | Example |
 |---|---|---|
-| `get_agents` | List available agents. | "What mesh agents are available?" |
-| `get_agent` | Read one agent's native Agent Card and runtime summary. | "Show me what the `pr-review` agent can do." |
-| `send_message` | Send a message to an agent through A2A. | "Ask `pr-review` to review Mesh-LLM/mesh-llm#708." |
-| `get_task` | Fetch persisted task state. | "Check whether the PR review task has finished." |
-| `view_text_artifact` | Read text parts from a task artifact. | "Open the review findings artifact." |
-| `view_data_artifact` | Read a structured task artifact. | "Show the structured findings returned by the agent." |
+| `agents.get_agents` | List available agents. | "What mesh agents are available?" |
+| `agents.get_agent` | Read one agent's native Agent Card and runtime summary. | "Show me what the `pr-review` agent can do." |
+| `agents.send_message` | Send a message to an agent through A2A. | "Ask `pr-review` to review Mesh-LLM/mesh-llm#708." |
+| `agents.get_task` | Fetch persisted task state. | "Check whether the PR review task has finished." |
+| `agents.view_text_artifact` | Read text parts from a task artifact. | "Open the review findings artifact." |
+| `agents.view_data_artifact` | Read a structured task artifact. | "Show the structured findings returned by the agent." |
 
 When running as a mesh-llm plugin, these tools are surfaced through mesh-llm's
-hosted MCP endpoint alongside the other mesh-provided tools.
+hosted MCP endpoint alongside the other mesh-provided tools. The plugin's
+internal A2A bridge still owns the official tool semantics; mesh prefixes the
+visible names because it is aggregating multiple plugins into one MCP namespace.
 
 ## Using Agents
 

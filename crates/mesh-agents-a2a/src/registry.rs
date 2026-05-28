@@ -316,12 +316,12 @@ impl Default for MeshToolsConfig {
         Self {
             enabled: true,
             available_tools: vec![
-                "get_agents".to_string(),
-                "get_agent".to_string(),
-                "send_message".to_string(),
-                "get_task".to_string(),
-                "view_text_artifact".to_string(),
-                "view_data_artifact".to_string(),
+                "agents.get_agents".to_string(),
+                "agents.get_agent".to_string(),
+                "agents.send_message".to_string(),
+                "agents.get_task".to_string(),
+                "agents.view_text_artifact".to_string(),
+                "agents.view_data_artifact".to_string(),
             ],
         }
     }

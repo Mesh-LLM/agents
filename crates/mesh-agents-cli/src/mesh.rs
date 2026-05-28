@@ -163,7 +163,7 @@ pub(crate) fn local_advertisements(
     Ok(registry
         .agents()
         .iter()
-        .filter(|agent| agent.runtime.enabled)
+        .filter(|agent| agent.runtime.enabled && agent.runtime.policy.advertise_on_mesh)
         .map(|agent| local_advertisement(agent, source_peer_id))
         .collect())
 }
@@ -232,4 +232,93 @@ fn cache_path(data_dir: &Path) -> PathBuf {
 
 fn task_cache_path(data_dir: &Path) -> PathBuf {
     data_dir.join("a2a").join("remote-tasks.json")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn temp_root(name: &str) -> PathBuf {
+        let root =
+            std::env::temp_dir().join(format!("mesh-agents-mesh-{name}-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(&root).expect("create temp root");
+        root
+    }
+
+    fn write_agent(root: &Path, id: &str, advertise_on_mesh: bool) {
+        let agent_dir = root.join(id);
+        fs::create_dir_all(&agent_dir).expect("create agent dir");
+        fs::write(
+            agent_dir.join("agent-card.json"),
+            format!(
+                r#"{{
+                  "name": "{id}",
+                  "description": "Test agent {id}.",
+                  "version": "1.0.0",
+                  "supportedInterfaces": [
+                    {{
+                      "url": "http://localhost:3131/a2a/agents/{id}",
+                      "protocolBinding": "JSONRPC",
+                      "protocolVersion": "1.0"
+                    }}
+                  ],
+                  "capabilities": {{ "streaming": true }},
+                  "defaultInputModes": ["text/plain"],
+                  "defaultOutputModes": ["text/markdown"],
+                  "skills": []
+                }}"#
+            ),
+        )
+        .expect("write agent card");
+        fs::write(
+            agent_dir.join("runtime.toml"),
+            format!(
+                r#"
+enabled = true
+visibility = "private"
+
+[runtime]
+type = "opencode"
+max_concurrent_tasks = 1
+
+[runtime.workspace]
+mode = "temp_per_task"
+
+[tools.mesh]
+enabled = true
+
+[policy]
+advertise_on_mesh = {advertise_on_mesh}
+public_mesh = false
+"#
+            ),
+        )
+        .expect("write runtime");
+    }
+
+    #[test]
+    fn local_advertisements_include_only_agents_opted_into_mesh_advertising() {
+        let root = temp_root("advertise-policy");
+        write_agent(&root, "published", true);
+        write_agent(&root, "private", false);
+
+        let ads = local_advertisements(&root, "peer-a").expect("load advertisements");
+
+        assert_eq!(ads.len(), 1);
+        assert_eq!(ads[0].agent_id, "published");
+        assert_eq!(ads[0].peer_id, "peer-a");
+    }
+
+    #[test]
+    fn local_agent_summaries_still_show_private_local_agents() {
+        let root = temp_root("local-summary-private");
+        write_agent(&root, "private", false);
+
+        let summaries = local_agent_summaries(&root).expect("load summaries");
+
+        assert_eq!(summaries.len(), 1);
+        assert_eq!(summaries[0]["agent_id"], "private");
+        assert_eq!(summaries[0]["location"], "local");
+    }
 }

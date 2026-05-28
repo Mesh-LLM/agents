@@ -99,12 +99,17 @@ Constraints:
 
 The hosted Mesh MCP endpoint must support the full user flow:
 
-- `get_agents`
-- `get_agent`
-- `send_message`
-- `get_task`
-- `view_text_artifact`
-- `view_data_artifact`
+- `agents.get_agents`
+- `agents.get_agent`
+- `agents.send_message`
+- `agents.get_task`
+- `agents.view_text_artifact`
+- `agents.view_data_artifact`
+
+Mesh's hosted MCP endpoint aggregates all plugin tools into one namespace, so
+visible tool names should stay plugin-prefixed. The agents plugin can keep
+official A2A tool semantics internally; the aggregate endpoint uses the
+`agents.*` prefix to prevent collisions with other plugins.
 
 The user should not need to know these tool names, name an agent, or ask to
 find an agent. The packaged skills should guide the AI client to recognize
@@ -218,7 +223,7 @@ Keep failure hardening scoped to task/debug quality:
 - Invalid Agent Card points to file and field.
 - Missing Mesh MCP endpoint names the URL.
 - ACP process failure stores logs under `{{ task.logs_dir }}`.
-- Failed task is persisted and readable through `get_task`.
+- Failed task is persisted and readable through `agents.get_task`.
 
 Do not spend time on harness install guidance.
 
@@ -271,7 +276,7 @@ Requirements:
   parent task id, and trigger metadata.
 - Autonomous agents use the same `max_concurrent_tasks` and queue policy as
   manually invoked agents.
-- Failures are readable through `get_task` and should include trigger context.
+- Failures are readable through `agents.get_task` and should include trigger context.
 - The first demo should use a local scheduled trigger, not external webhooks.
 
 ## 12. Support Agents Calling Agents
