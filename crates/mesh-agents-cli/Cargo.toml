@@ -21,7 +21,6 @@ dirs = "6"
 http-body-util = "0.1"
 mesh-agents-a2a = { path = "../mesh-agents-a2a" }
 mesh-agents-acp-bridge = { path = "../mesh-agents-acp-bridge" }
-mesh-agents-skills = { path = "../mesh-agents-skills" }
 mesh-llm-plugin = { git = "https://github.com/Mesh-LLM/mesh-llm", rev = "6a0451a91" }
 rmcp = { version = "1.2", features = ["server", "transport-io"] }
 schemars = "1"

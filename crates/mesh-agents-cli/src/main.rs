@@ -1,6 +1,5 @@
 mod a2a;
 mod agents;
-mod codex;
 mod mesh;
 mod plugin;
 
@@ -32,16 +31,6 @@ enum Command {
     Agents {
         #[command(subcommand)]
         command: AgentsCommand,
-    },
-    /// Configure Codex for mesh agents.
-    Codex {
-        #[command(subcommand)]
-        command: CodexCommand,
-    },
-    /// Low-level skill plumbing.
-    Skills {
-        #[command(subcommand)]
-        command: SkillsCommand,
     },
 }
 
@@ -114,56 +103,6 @@ pub(crate) enum AgentRuntimeArg {
     Remote,
 }
 
-#[derive(Debug, Subcommand)]
-pub(crate) enum CodexCommand {
-    /// Install the mesh-agents skill and configure the A2A MCP server.
-    Setup {
-        /// Codex config file. Defaults to ~/.codex/config.toml.
-        #[arg(long)]
-        config: Option<PathBuf>,
-        /// Codex skills directory. Defaults to ~/.codex/skills.
-        #[arg(long)]
-        skills_dir: Option<PathBuf>,
-        /// Command Codex should run for the A2A MCP server.
-        #[arg(long, default_value = "agents")]
-        mcp_command: String,
-        /// Print changes instead of writing files.
-        #[arg(long)]
-        dry_run: bool,
-    },
-}
-
-#[derive(Debug, Subcommand)]
-pub(crate) enum SkillsCommand {
-    /// List built-in skills.
-    List,
-    /// Install a built-in skill.
-    Install {
-        /// Skill name. Currently only mesh-agents.
-        skill: String,
-        /// Codex skills directory. Defaults to ~/.codex/skills.
-        #[arg(long)]
-        codex_dir: Option<PathBuf>,
-        /// Replace an existing installed skill.
-        #[arg(long)]
-        force: bool,
-    },
-    /// Remove a built-in skill.
-    Uninstall {
-        /// Skill name. Currently only mesh-agents.
-        skill: String,
-        /// Codex skills directory. Defaults to ~/.codex/skills.
-        #[arg(long)]
-        codex_dir: Option<PathBuf>,
-    },
-    /// Show built-in skill install status.
-    Status {
-        /// Codex skills directory. Defaults to ~/.codex/skills.
-        #[arg(long)]
-        codex_dir: Option<PathBuf>,
-    },
-}
-
 #[tokio::main]
 async fn main() -> Result<()> {
     if std::env::var_os("MESH_LLM_PLUGIN_ENDPOINT").is_some() {
@@ -177,7 +116,5 @@ async fn main() -> Result<()> {
             data_dir,
         } => a2a::run_a2a_mcp(agents_dir.as_deref(), data_dir.as_deref()).await,
         Command::Agents { command } => agents::dispatch_agents_command(&command),
-        Command::Codex { command } => codex::dispatch_codex_command(&command),
-        Command::Skills { command } => codex::dispatch_skills_command(&command),
     }
 }

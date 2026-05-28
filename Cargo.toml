@@ -3,7 +3,6 @@ members = [
     "crates/mesh-agents-a2a",
     "crates/mesh-agents-acp-bridge",
     "crates/mesh-agents-cli",
-    "crates/mesh-agents-skills",
 ]
 resolver = "2"
 

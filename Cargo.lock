@@ -1449,7 +1449,6 @@ dependencies = [
  "http-body-util",
  "mesh-agents-a2a",
  "mesh-agents-acp-bridge",
- "mesh-agents-skills",
  "mesh-llm-plugin",
  "rmcp",
  "schemars 1.2.1",
@@ -1491,14 +1490,6 @@ dependencies = [
  "serde",
  "serde_json",
  "tokio",
-]
-
-[[package]]
-name = "mesh-agents-skills"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "serde",
 ]
 
 [[package]]

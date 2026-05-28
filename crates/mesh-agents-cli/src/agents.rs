@@ -79,7 +79,7 @@ fn init_agent(
             .with_context(|| format!("failed to remove {}", agent_dir.display()))?;
     }
 
-    fs::create_dir_all(agent_dir.join("skill"))
+    fs::create_dir_all(&agent_dir)
         .with_context(|| format!("failed to create {}", agent_dir.display()))?;
     write_agent_card(&agent_dir, agent_id)?;
     write_runtime(&agent_dir, runtime)?;
@@ -93,11 +93,6 @@ fn init_agent(
             agent_dir.join(INSTRUCTIONS_FILE).display()
         )
     })?;
-    fs::write(
-        agent_dir.join("skill").join("SKILL.md"),
-        default_skill(agent_id),
-    )
-    .with_context(|| format!("failed to write skill for {agent_id}"))?;
 
     let definition = AgentDefinition::load(agent_dir.clone())?;
     println!("created agent {} at {}", definition.id, agent_dir.display());
@@ -284,25 +279,6 @@ fn default_instructions(agent_id: &str) -> String {
     )
 }
 
-fn default_skill(agent_id: &str) -> String {
-    format!(
-        r#"---
-name: mesh-llm-{agent_id}
-description: Send pull request review work to the mesh-llm {agent_id} A2A agent.
----
-
-Use this skill when the user asks for a GitHub pull request code review that should run through mesh-llm A2A.
-
-Call the mesh-llm A2A MCP tools:
-
-- `get_agents` to confirm `{agent_id}` is available.
-- `send_message` with agent id `{agent_id}` and the pull request URL or review brief.
-- `get_task` to check completion.
-- `view_text_artifact` or `view_data_artifact` to inspect returned artifacts.
-"#
-    )
-}
-
 fn title_from_agent_id(agent_id: &str) -> String {
     agent_id
         .split(['-', '_'])
@@ -357,6 +333,6 @@ mod tests {
         assert_eq!(agent.card.name, "Pr Review");
         assert!(agent.runtime.enabled);
         assert_eq!(agent.runtime.runtime.max_concurrent_tasks, 1);
-        assert!(agent.dir.join("skill").join("SKILL.md").is_file());
+        assert!(agent.dir.join("instructions.md").is_file());
     }
 }
