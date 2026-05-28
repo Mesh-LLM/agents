@@ -1,0 +1,40 @@
+enabled = true
+visibility = "private"
+
+[runtime]
+type = "acp"
+command = "opencode"
+args = ["acp"]
+model = "auto"
+max_concurrent_tasks = 1
+
+[runtime.workspace]
+mode = "temp_per_task"
+prefix = "mesh-pr-review-"
+keep = "on_failure"
+
+[runtime.env]
+MESH_LLM_MCP_URL = "{{ mesh.mcp_url }}"
+MESH_LLM_OPENAI_URL = "{{ mesh.openai_url }}"
+MESH_AGENT_ID = "{{ agent.id }}"
+MESH_AGENT_NAME = "{{ agent.name }}"
+MESH_TASK_ID = "{{ task.id }}"
+MESH_TASK_WORKSPACE = "{{ task.workspace }}"
+MESH_TASK_PROMPT = "{{ task.prompt_path }}"
+MESH_TASK_ARTIFACTS_DIR = "{{ task.artifacts_dir }}"
+MESH_TASK_LOGS_DIR = "{{ task.logs_dir }}"
+MESH_AGENT_INSTRUCTIONS = "{{ instructions.file }}"
+
+[instructions]
+file = "instructions.md"
+delivery = "first_prompt"
+
+[tools.mesh]
+enabled = true
+
+[policy]
+advertise_on_mesh = false
+public_mesh = false
+network = "enabled"
+filesystem = "workspace"
+max_task_seconds = 1800

@@ -72,6 +72,8 @@ Requirements:
   and line references.
 - The example should be directly usable as the main demo agent.
 
+Status: implemented in `examples/pr-review/`.
+
 ## 4. Make Setup Simple
 
 The happy path should be:
@@ -79,7 +81,7 @@ The happy path should be:
 ```bash
 mesh-llm plugins install Mesh-LLM/agents
 mesh-llm skills install
-mesh-llm agents init pr-review --runtime opencode
+cp -R examples/pr-review ~/.mesh-llm/agents/pr-review
 mesh-llm agents validate pr-review
 mesh-llm opencode
 ```
@@ -89,6 +91,9 @@ Constraints:
 - No direct `agents mcp`.
 - No manual MCP config.
 - No console dependency.
+- `mesh-llm agents init pr-review --runtime opencode` remains the quick
+  authoring path for creating a starter local agent, but the demo should use
+  the richer checked-in `examples/pr-review` definition.
 
 ## 5. Make MCP Tools Reliable
 
@@ -101,9 +106,10 @@ The hosted Mesh MCP endpoint must support the full user flow:
 - `view_text_artifact`
 - `view_data_artifact`
 
-The user should not need to know these tool names or ask to find an agent. The
-packaged skills should guide the AI client to recognize delegatable tasks,
-discover matching agents, inspect, delegate, poll, and read artifacts.
+The user should not need to know these tool names, name an agent, or ask to
+find an agent. The packaged skills should guide the AI client to recognize
+delegatable tasks, discover matching agents, inspect, delegate, poll, and read
+artifacts.
 
 For the demo, a prompt like `Code review Mesh-LLM/mesh-llm#708.` should be
 enough for the client to choose `pr-review` through discovery.

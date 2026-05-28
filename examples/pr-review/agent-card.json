@@ -1,0 +1,31 @@
+{
+  "name": "Pull Request Reviewer",
+  "description": "Reviews GitHub pull requests for correctness, regressions, security risks, and missing tests, then returns prioritized findings with file and line references.",
+  "version": "0.1.0",
+  "supportedInterfaces": [
+    {
+      "url": "http://127.0.0.1:3131/a2a/agents/pr-review",
+      "protocolBinding": "JSONRPC",
+      "protocolVersion": "1.0"
+    }
+  ],
+  "capabilities": {
+    "streaming": true
+  },
+  "defaultInputModes": ["text/plain"],
+  "defaultOutputModes": ["text/markdown", "application/json"],
+  "skills": [
+    {
+      "id": "pr-review",
+      "name": "Pull request review",
+      "description": "Inspect a GitHub pull request and report correctness, regression, security, and test risks.",
+      "tags": ["github", "code-review", "pull-request", "coding"]
+    },
+    {
+      "id": "branch-review",
+      "name": "Branch review",
+      "description": "Review a local or remote branch diff and return prioritized code review findings.",
+      "tags": ["git", "code-review", "branch", "coding"]
+    }
+  ]
+}

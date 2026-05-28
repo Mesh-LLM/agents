@@ -240,6 +240,20 @@ That creates the files for the example pull request reviewer:
       instructions.md
 ```
 
+This repository also includes a ready-to-use demo definition under
+`examples/pr-review/`. During plugin development, copy that directory into your
+local agent registry and validate it:
+
+```bash
+mkdir -p ~/.mesh-llm/agents
+cp -R examples/pr-review ~/.mesh-llm/agents/pr-review
+mesh-llm agents validate pr-review
+```
+
+The generated files and the example files use the same shape. `agents init` is
+the quickest way to start a new local agent; `examples/pr-review` is the richer
+demo version used throughout this README.
+
 ### Agent Card
 
 `agent-card.json` is the native
@@ -470,36 +484,32 @@ hosted MCP endpoint alongside the other mesh-provided tools.
 
 ## Using Agents
 
-Use agents by asking your AI tool to find an agent and delegate the work. The
-client uses Mesh's MCP tools behind the scenes.
+Use agents by asking for the work you want done. You should not have to know
+that agents exist, name an agent, or ask for discovery first. The client uses
+Mesh's MCP tools behind the scenes to find the right A2A Agent Card, delegate
+the task, poll task state, and read artifacts.
 
 Example prompts using the `pr-review` agent:
 
 ```text
-Find an available mesh agent that can review GitHub pull requests, then use it
-to review Mesh-LLM/mesh-llm#708. Return only actionable findings with file and
-line references.
+Code review Mesh-LLM/mesh-llm#708.
 ```
 
 ```text
-Use the pr-review mesh agent to review the current branch. Prioritize
-correctness, regressions, and missing tests. Include the task artifact when it
-finishes.
+Review the current branch for correctness regressions and missing tests.
 ```
 
 ```text
-Show me the Agent Card for pr-review before you use it. Confirm it is the right
-agent for a GitHub pull request review, then send it Mesh-LLM/mesh-llm#708.
+Review this PR and return only actionable findings with file and line
+references: https://github.com/Mesh-LLM/mesh-llm/pull/708
 ```
 
 ```text
-Check whether the pr-review task has completed and summarize the returned
-findings artifact.
+Show me the findings artifact from that review.
 ```
 
 ```text
-Use pr-review to review this branch, but only report correctness issues,
-security risks, regressions, and missing tests.
+Check whether the previous pull request review task has completed.
 ```
 
 The same pattern works for other agents such as `docs-maintainer`,
