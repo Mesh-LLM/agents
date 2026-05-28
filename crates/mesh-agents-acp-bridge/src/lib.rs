@@ -9,9 +9,10 @@ use std::path::{Path, PathBuf};
 use anyhow::{bail, Context, Result};
 use futures::{stream, stream::BoxStream};
 use mesh_agents_a2a::{
-    A2AError, AgentDefinition, AgentExecutor, InstructionDelivery, Message, Part, Role,
+    A2AError, AgentDefinition, AgentExecutor, Artifact, InstructionDelivery, Message, Part, Role,
     RuntimeConfig, RuntimeKind, StreamResponse, Task, TaskState, TaskStatus, WorkspaceMode,
 };
+use serde_json::{json, Value};
 
 pub use agent_client_protocol::{AcpAgent, Client, ConnectTo, Stdio};
 
@@ -201,7 +202,10 @@ async fn run_task(
         return failed_task(ctx, err.to_string());
     }
     match run_acp_once(&agent, &workspace, &task_paths, prompt).await {
-        Ok(output) => completed_task(ctx, output),
+        Ok(output) => match completed_task_from_paths(ctx, output, &task_paths) {
+            Ok(task) => task,
+            Err(err) => failed_task(err.ctx, err.message),
+        },
         Err(err) => failed_task(ctx, err.to_string()),
     }
 }
@@ -592,7 +596,28 @@ fn sanitize_path_component(value: &str) -> String {
         .collect()
 }
 
-fn completed_task(ctx: mesh_agents_a2a::ExecutorContext, output: String) -> Task {
+fn completed_task_from_paths(
+    ctx: mesh_agents_a2a::ExecutorContext,
+    output: String,
+    task_paths: &TaskRuntimePaths,
+) -> std::result::Result<Task, TaskBuildError> {
+    let artifacts = match task_artifacts(task_paths, &output) {
+        Ok(artifacts) => artifacts,
+        Err(error) => {
+            return Err(TaskBuildError {
+                ctx,
+                message: error.to_string(),
+            });
+        }
+    };
+    Ok(completed_task(ctx, output, artifacts))
+}
+
+fn completed_task(
+    ctx: mesh_agents_a2a::ExecutorContext,
+    output: String,
+    artifacts: Vec<Artifact>,
+) -> Task {
     let response = Message::new(Role::Agent, vec![Part::text(output)]);
     Task {
         id: ctx.task_id,
@@ -602,9 +627,108 @@ fn completed_task(ctx: mesh_agents_a2a::ExecutorContext, output: String) -> Task
             message: Some(response),
             timestamp: None,
         },
-        artifacts: None,
+        artifacts: Some(artifacts),
         history: ctx.stored_task.and_then(|task| task.history),
         metadata: Some(executor_metadata()),
+    }
+}
+
+struct TaskBuildError {
+    ctx: mesh_agents_a2a::ExecutorContext,
+    message: String,
+}
+
+impl std::fmt::Debug for TaskBuildError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("TaskBuildError")
+            .field("message", &self.message)
+            .finish_non_exhaustive()
+    }
+}
+
+fn task_artifacts(task_paths: &TaskRuntimePaths, output: &str) -> Result<Vec<Artifact>> {
+    let mut artifacts = artifacts_from_dir(&task_paths.artifacts_dir)?;
+    if !artifacts
+        .iter()
+        .any(|artifact| artifact.artifact_id == "summary.md")
+    {
+        artifacts.insert(0, text_artifact("summary.md", output.to_string()));
+    }
+    Ok(artifacts)
+}
+
+fn artifacts_from_dir(path: &Path) -> Result<Vec<Artifact>> {
+    let mut entries = std::fs::read_dir(path)
+        .with_context(|| format!("failed to read artifacts directory {}", path.display()))?
+        .filter_map(std::result::Result::ok)
+        .map(|entry| entry.path())
+        .filter(|path| path.is_file())
+        .collect::<Vec<_>>();
+    entries.sort();
+
+    entries
+        .into_iter()
+        .map(|path| artifact_from_file(&path))
+        .collect()
+}
+
+fn artifact_from_file(path: &Path) -> Result<Artifact> {
+    let artifact_id = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .context("artifact file name must be UTF-8")?
+        .to_string();
+    let raw = std::fs::read_to_string(path)
+        .with_context(|| format!("failed to read artifact {}", path.display()))?;
+    if path
+        .extension()
+        .is_some_and(|extension| extension == "json")
+    {
+        let value = serde_json::from_str::<Value>(&raw)
+            .with_context(|| format!("failed to parse JSON artifact {}", path.display()))?;
+        return Ok(data_artifact(artifact_id, value));
+    }
+    Ok(text_artifact(artifact_id, raw))
+}
+
+fn text_artifact(artifact_id: impl Into<String>, text: String) -> Artifact {
+    let artifact_id = artifact_id.into();
+    Artifact {
+        artifact_id: artifact_id.clone(),
+        name: Some(artifact_id.clone()),
+        description: Some("Text artifact produced by the ACP harness.".to_string()),
+        parts: vec![Part::text(text).with_media_type(media_type_for(&artifact_id))],
+        metadata: Some(HashMap::from([(
+            "path_hint".to_string(),
+            Value::String(artifact_id),
+        )])),
+        extensions: None,
+    }
+}
+
+fn data_artifact(artifact_id: impl Into<String>, value: Value) -> Artifact {
+    let artifact_id = artifact_id.into();
+    Artifact {
+        artifact_id: artifact_id.clone(),
+        name: Some(artifact_id.clone()),
+        description: Some("Structured artifact produced by the ACP harness.".to_string()),
+        parts: vec![Part::data(value).with_media_type("application/json")],
+        metadata: Some(HashMap::from([(
+            "path_hint".to_string(),
+            Value::String(artifact_id),
+        )])),
+        extensions: None,
+    }
+}
+
+fn media_type_for(path: &str) -> &'static str {
+    if path.ends_with(".md") {
+        "text/markdown"
+    } else if path.ends_with(".json") {
+        "application/json"
+    } else {
+        "text/plain"
     }
 }
 
@@ -625,10 +749,7 @@ fn failed_task(ctx: mesh_agents_a2a::ExecutorContext, error: String) -> Task {
 }
 
 fn executor_metadata() -> HashMap<String, serde_json::Value> {
-    HashMap::from([(
-        "mesh_llm_executor".to_string(),
-        serde_json::Value::String("acp".to_string()),
-    )])
+    HashMap::from([("mesh_llm_executor".to_string(), json!("acp"))])
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -874,6 +995,64 @@ mod tests {
         assert!(workspace.is_dir());
     }
 
+    #[test]
+    fn completed_task_collects_harness_artifacts() {
+        let root = temp_root("artifacts");
+        let artifacts_dir = root.join("artifacts");
+        std::fs::create_dir_all(&artifacts_dir).unwrap();
+        std::fs::write(artifacts_dir.join("summary.md"), "# Review\n\nNo findings.").unwrap();
+        std::fs::write(
+            artifacts_dir.join("findings.json"),
+            r#"[{"severity":"low","issue":"missing test"}]"#,
+        )
+        .unwrap();
+        let paths = TaskRuntimePaths {
+            task_id: "task-1".to_string(),
+            data_dir: root.clone(),
+            prompt_path: root.join("prompt.txt"),
+            artifacts_dir,
+            logs_dir: root.join("logs"),
+        };
+
+        let task = completed_task_from_paths(test_context(), "fallback output".to_string(), &paths)
+            .unwrap();
+
+        let artifacts = task
+            .artifacts
+            .expect("completed task should have artifacts");
+        assert_eq!(artifacts.len(), 2);
+        assert_eq!(artifacts[0].artifact_id, "findings.json");
+        assert_eq!(artifacts[1].artifact_id, "summary.md");
+        assert_eq!(
+            artifacts[1].parts[0].as_text(),
+            Some("# Review\n\nNo findings.")
+        );
+    }
+
+    #[test]
+    fn completed_task_adds_summary_artifact_when_harness_writes_none() {
+        let root = temp_root("fallback-artifact");
+        let artifacts_dir = root.join("artifacts");
+        std::fs::create_dir_all(&artifacts_dir).unwrap();
+        let paths = TaskRuntimePaths {
+            task_id: "task-1".to_string(),
+            data_dir: root.clone(),
+            prompt_path: root.join("prompt.txt"),
+            artifacts_dir,
+            logs_dir: root.join("logs"),
+        };
+
+        let task =
+            completed_task_from_paths(test_context(), "review output".to_string(), &paths).unwrap();
+
+        let artifacts = task
+            .artifacts
+            .expect("completed task should have artifacts");
+        assert_eq!(artifacts.len(), 1);
+        assert_eq!(artifacts[0].artifact_id, "summary.md");
+        assert_eq!(artifacts[0].parts[0].as_text(), Some("review output"));
+    }
+
     #[tokio::test]
     #[ignore = "requires an installed and configured OpenCode ACP agent"]
     async fn live_opencode_acp_initialize_smoke() {
@@ -924,6 +1103,19 @@ mod tests {
             queue: QueueConfig::default(),
             workspace: WorkspaceConfig::default(),
             env: Default::default(),
+        }
+    }
+
+    fn test_context() -> mesh_agents_a2a::ExecutorContext {
+        mesh_agents_a2a::ExecutorContext {
+            message: None,
+            task_id: "task-1".to_string(),
+            stored_task: None,
+            context_id: "context-1".to_string(),
+            metadata: None,
+            user: None,
+            service_params: Default::default(),
+            tenant: None,
         }
     }
 

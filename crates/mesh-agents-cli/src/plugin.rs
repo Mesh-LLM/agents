@@ -1,12 +1,14 @@
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use anyhow::{anyhow, bail, Context, Result};
 use axum::body::Body;
 use http_body_util::BodyExt;
 use mesh_agents_a2a::{
-    jsonrpc_methods, AgentDefinition, AgentRegistry, JsonRpcId, JsonRpcRequest, JsonRpcResponse,
-    LocalAgentService, TaskStore,
+    jsonrpc_methods, AgentDefinition, AgentRegistry, Artifact, JsonRpcId, JsonRpcRequest,
+    JsonRpcResponse, LocalAgentService, QueueMode, Task, TaskStore,
 };
 use mesh_agents_acp_bridge::AcpAgentExecutor;
 use mesh_llm_plugin::{
@@ -17,6 +19,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use tokio::io::AsyncReadExt;
+use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 use tower::ServiceExt as TowerServiceExt;
 
 use crate::mesh::{
@@ -33,6 +36,7 @@ const MCP_ENDPOINT_ID: &str = "mcp";
 struct PluginState {
     agents_dir: PathBuf,
     data_dir: PathBuf,
+    gates: AgentGates,
 }
 
 impl PluginState {
@@ -40,6 +44,7 @@ impl PluginState {
         Ok(Self {
             agents_dir: resolve_agents_dir()?,
             data_dir: resolve_data_dir()?,
+            gates: AgentGates::default(),
         })
     }
 }
@@ -63,6 +68,13 @@ struct SendMessageArgs {
 struct TaskArgs {
     agent_id: String,
     task_id: String,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+struct ArtifactArgs {
+    agent_id: String,
+    task_id: String,
+    artifact_id: String,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -101,6 +113,8 @@ fn build_plugin_with_command(
     let get_agent_state = state.clone();
     let send_message_state = state.clone();
     let get_task_state = state.clone();
+    let view_text_artifact_state = state.clone();
+    let view_data_artifact_state = state.clone();
     let open_stream_state = state;
 
     let plugin = mesh_llm_plugin::plugin! {
@@ -171,6 +185,38 @@ fn build_plugin_with_command(
                         plugin_get_task(&state, &args.agent_id, &args.task_id)
                             .await
                             .map_err(Into::into)
+                    })
+                }),
+            mesh_llm_plugin::mcp::tool("view_text_artifact")
+                .description("Read text content from an A2A task artifact.")
+                .input::<ArtifactArgs>()
+                .handle(move |args, _context| {
+                    let state = view_text_artifact_state.clone();
+                    Box::pin(async move {
+                        plugin_view_text_artifact(
+                            &state,
+                            &args.agent_id,
+                            &args.task_id,
+                            &args.artifact_id,
+                        )
+                        .await
+                        .map_err(Into::into)
+                    })
+                }),
+            mesh_llm_plugin::mcp::tool("view_data_artifact")
+                .description("Read structured data for an A2A task artifact.")
+                .input::<ArtifactArgs>()
+                .handle(move |args, _context| {
+                    let state = view_data_artifact_state.clone();
+                    Box::pin(async move {
+                        plugin_view_data_artifact(
+                            &state,
+                            &args.agent_id,
+                            &args.task_id,
+                            &args.artifact_id,
+                        )
+                        .await
+                        .map_err(Into::into)
                     })
                 }),
         ],
@@ -333,6 +379,7 @@ async fn plugin_send_message(
         if !agent.runtime.enabled {
             bail!("agent `{}` is disabled", args.agent_id);
         }
+        let _permit = state.gates.acquire(agent).await?;
         let result = execute_local_agent(
             agent.clone(),
             &state.data_dir,
@@ -406,6 +453,83 @@ async fn plugin_get_task(state: &PluginState, agent_id: &str, task_id: &str) -> 
         "peer_id": remote.peer_id,
         "task": remote.result,
     }))
+}
+
+async fn plugin_view_text_artifact(
+    state: &PluginState,
+    agent_id: &str,
+    task_id: &str,
+    artifact_id: &str,
+) -> Result<Value> {
+    let artifact = plugin_load_artifact(state, agent_id, task_id, artifact_id).await?;
+    let text = artifact
+        .parts
+        .iter()
+        .filter_map(|part| part.as_text())
+        .collect::<Vec<_>>()
+        .join("\n");
+    if text.is_empty() {
+        bail!("artifact `{artifact_id}` has no text parts");
+    }
+    Ok(json!({
+        "agent_id": agent_id,
+        "task_id": task_id,
+        "artifact_id": artifact.artifact_id,
+        "text": text,
+    }))
+}
+
+async fn plugin_view_data_artifact(
+    state: &PluginState,
+    agent_id: &str,
+    task_id: &str,
+    artifact_id: &str,
+) -> Result<Value> {
+    let artifact = plugin_load_artifact(state, agent_id, task_id, artifact_id).await?;
+    Ok(json!({
+        "agent_id": agent_id,
+        "task_id": task_id,
+        "artifact": artifact,
+    }))
+}
+
+async fn plugin_load_artifact(
+    state: &PluginState,
+    agent_id: &str,
+    task_id: &str,
+    artifact_id: &str,
+) -> Result<Artifact> {
+    let task = plugin_load_task(state, agent_id, task_id).await?;
+    let artifacts = task.artifacts.unwrap_or_default();
+    artifacts
+        .into_iter()
+        .find(|artifact| artifact.artifact_id == artifact_id)
+        .with_context(|| format!("artifact `{artifact_id}` was not found on task `{task_id}`"))
+}
+
+async fn plugin_load_task(state: &PluginState, agent_id: &str, task_id: &str) -> Result<Task> {
+    let path = mesh_agents_a2a::agent_task_store_path(&state.data_dir, agent_id);
+    if path.exists() {
+        let store = mesh_agents_a2a::PersistentTaskStore::open(&path)
+            .map_err(|error| anyhow!("failed to open task store {}: {error}", path.display()))?;
+        if let Some(task) = store.get(task_id).await? {
+            return Ok(task);
+        }
+    }
+
+    let remote = RemoteTaskCache::load(&state.data_dir)?
+        .get(agent_id, task_id)
+        .cloned()
+        .with_context(|| format!("task `{task_id}` was not found for agent `{agent_id}`"))?;
+    decode_task_value(remote.result)
+        .with_context(|| format!("failed to decode remote task `{task_id}`"))
+}
+
+fn decode_task_value(value: Value) -> Result<Task> {
+    if let Some(task) = value.get("task") {
+        return serde_json::from_value(task.clone()).context("failed to decode wrapped task");
+    }
+    serde_json::from_value(value).context("failed to decode task")
 }
 
 async fn send_remote_message_stream(
@@ -522,6 +646,7 @@ async fn serve_mesh_stream_request(
             if !agent.runtime.enabled {
                 bail!("agent `{agent_id}` is disabled");
             }
+            let _permit = state.gates.acquire(&agent).await?;
             stream_local_agent_response(
                 agent,
                 &state.data_dir,
@@ -545,6 +670,7 @@ async fn execute_local_send_message(
     if !agent.runtime.enabled {
         bail!("agent `{}` is disabled", request.agent_id);
     }
+    let _permit = state.gates.acquire(&agent).await?;
     execute_local_agent(
         agent,
         &state.data_dir,
@@ -581,6 +707,109 @@ async fn execute_local_agent(
     response
         .result
         .context("A2A response did not include a result")
+}
+
+#[derive(Clone, Debug, Default)]
+struct AgentGates {
+    gates: Arc<Mutex<std::collections::HashMap<String, Arc<AgentGate>>>>,
+}
+
+impl AgentGates {
+    async fn acquire(&self, agent: &AgentDefinition) -> Result<AgentGatePermit> {
+        let gate = self.gate_for(agent)?;
+        gate.acquire(agent).await
+    }
+
+    fn gate_for(&self, agent: &AgentDefinition) -> Result<Arc<AgentGate>> {
+        let limit = agent.runtime.runtime.max_concurrent_tasks.max(1);
+        let mut gates = self
+            .gates
+            .lock()
+            .map_err(|_| anyhow!("agent concurrency gate lock was poisoned"))?;
+        let gate = gates
+            .entry(agent.id.clone())
+            .or_insert_with(|| Arc::new(AgentGate::new(limit)));
+        if gate.limit == limit {
+            return Ok(gate.clone());
+        }
+
+        let gate = Arc::new(AgentGate::new(limit));
+        gates.insert(agent.id.clone(), gate.clone());
+        Ok(gate)
+    }
+}
+
+#[derive(Debug)]
+struct AgentGate {
+    limit: usize,
+    semaphore: Arc<Semaphore>,
+    queued: AtomicUsize,
+}
+
+impl AgentGate {
+    fn new(limit: usize) -> Self {
+        Self {
+            limit,
+            semaphore: Arc::new(Semaphore::new(limit)),
+            queued: AtomicUsize::new(0),
+        }
+    }
+
+    async fn acquire(&self, agent: &AgentDefinition) -> Result<AgentGatePermit> {
+        match agent.runtime.runtime.queue.mode {
+            QueueMode::Reject => self.try_acquire(agent),
+            QueueMode::Queue => self.acquire_queued(agent).await,
+        }
+    }
+
+    fn try_acquire(&self, agent: &AgentDefinition) -> Result<AgentGatePermit> {
+        self.semaphore
+            .clone()
+            .try_acquire_owned()
+            .map(|permit| AgentGatePermit { _permit: permit })
+            .map_err(|_| anyhow!("agent `{}` is at its concurrency limit", agent.id))
+    }
+
+    async fn acquire_queued(&self, agent: &AgentDefinition) -> Result<AgentGatePermit> {
+        let max_pending = agent.runtime.runtime.queue.max_pending_tasks;
+        if max_pending == 0 {
+            return self.try_acquire(agent);
+        }
+
+        let queued = self.queued.fetch_add(1, Ordering::SeqCst) + 1;
+        if queued > max_pending {
+            self.queued.fetch_sub(1, Ordering::SeqCst);
+            bail!(
+                "agent `{}` task queue is full; pending limit is {}",
+                agent.id,
+                max_pending
+            );
+        }
+        let queued_slot = QueuedSlot(&self.queued);
+
+        let permit = self
+            .semaphore
+            .clone()
+            .acquire_owned()
+            .await
+            .map(|permit| AgentGatePermit { _permit: permit })
+            .map_err(|_| anyhow!("agent `{}` concurrency gate was closed", agent.id));
+        drop(queued_slot);
+        permit
+    }
+}
+
+#[derive(Debug)]
+struct AgentGatePermit {
+    _permit: OwnedSemaphorePermit,
+}
+
+struct QueuedSlot<'a>(&'a AtomicUsize);
+
+impl Drop for QueuedSlot<'_> {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, Ordering::SeqCst);
+    }
 }
 
 fn send_message_request(message: &str, context_id: Option<&str>) -> JsonRpcRequest {
@@ -752,6 +981,7 @@ mod tests {
             PluginState {
                 agents_dir: PathBuf::from("/tmp/agents"),
                 data_dir: PathBuf::from("/tmp/mesh"),
+                gates: AgentGates::default(),
             },
         )
         .expect("build plugin");
@@ -772,6 +1002,14 @@ mod tests {
             .operations
             .iter()
             .any(|op| op.name == "send_message"));
+        assert!(manifest
+            .operations
+            .iter()
+            .any(|op| op.name == "view_text_artifact"));
+        assert!(manifest
+            .operations
+            .iter()
+            .any(|op| op.name == "view_data_artifact"));
     }
 
     fn command_basename(command: &str) -> &str {
