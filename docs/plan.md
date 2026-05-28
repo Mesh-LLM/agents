@@ -222,7 +222,95 @@ Keep failure hardening scoped to task/debug quality:
 
 Do not spend time on harness install guidance.
 
-## 11. Demo Script
+## 11. Support Autonomous Agents
+
+Autonomous agents should use the same A2A and MCP surfaces as user-invoked
+agents. They are not a separate admin system. The difference is that a trigger
+starts the task instead of a user prompt.
+
+Example:
+
+```text
+github-pr-monitor -> Mesh MCP discovery -> pr-review -> test-runner -> summary artifact
+```
+
+A `github-pr-monitor` agent could watch a repository, notice that a new pull
+request is ready for review, discover a suitable `pr-review` agent through Mesh
+MCP, call it through A2A, then optionally call a `test-runner` agent if the
+review finds risky changes. The final result is still persisted as A2A task
+state and artifacts.
+
+Planned trigger model:
+
+- `manual`: normal user-initiated A2A task.
+- `schedule`: run on an interval or wall-clock schedule.
+- `webhook`: accept an external event and convert it into an A2A task.
+- `mesh_event`: react to mesh-visible events, such as an agent advertisement,
+  model capability change, or completed task.
+- `watch`: poll an external system through an MCP tool or harness capability.
+
+Example direction:
+
+```toml
+[triggers.pr_watch]
+type = "schedule"
+interval = "10m"
+prompt = "Check Mesh-LLM/mesh-llm for pull requests that need review."
+
+[autonomy]
+enabled = true
+max_actions_per_run = 4
+max_delegate_depth = 2
+dedupe_key = "github-pr-url"
+```
+
+Requirements:
+
+- Trigger state must be persisted in SQLite so restarts do not duplicate work.
+- Triggered tasks must look like normal A2A tasks with a clear initiator,
+  parent task id, and trigger metadata.
+- Autonomous agents use the same `max_concurrent_tasks` and queue policy as
+  manually invoked agents.
+- Failures are readable through `get_task` and should include trigger context.
+- The first demo should use a local scheduled trigger, not external webhooks.
+
+## 12. Support Agents Calling Agents
+
+Agents should be able to call other agents through the same Mesh MCP tools that
+clients use. This keeps composition official-looking and avoids inventing a
+private plugin-only delegation API.
+
+Requirements:
+
+- Harnessed agents automatically receive Mesh's hosted MCP endpoint when
+  `[tools.mesh] enabled = true`.
+- The packaged `mesh-agents` skill should teach clients and harnessed agents
+  to discover before delegating, inspect the Agent Card, send the A2A task,
+  poll task state, and read artifacts.
+- Child tasks should record `parent_task_id`, `root_task_id`, and caller agent
+  id so task trees can be inspected later.
+- Delegation needs guardrails:
+  - maximum delegate depth
+  - maximum child tasks per parent
+  - optional allowed agent id or skill tags
+  - cycle detection for repeated agent/task chains
+  - clear failure when policy denies delegation
+- Child task artifacts should be referenceable from the parent task result.
+
+Good demo shape:
+
+```text
+User: Code review Mesh-LLM/mesh-llm#708.
+Codex/OpenCode -> Mesh MCP -> pr-review
+pr-review -> Mesh MCP -> test-runner
+pr-review returns findings plus a linked test artifact
+```
+
+This is more compelling than asking the user to manually find and chain agents:
+the user asks for the outcome, the selected agent decides which specialized
+agents can help, and Mesh records the task tree.
+
+## 13. Demo Script
 
 1. Start a private mesh node.
 2. Install the agents plugin.
@@ -245,6 +333,10 @@ Do not spend time on harness install guidance.
 
 8. Restart mesh-llm and ask for the prior task state.
 9. Optional: repeat with `pr-review` hosted on Node B.
+10. Optional autonomy demo: enable a local scheduled monitor that discovers a
+    PR needing review, delegates to `pr-review`, and stores the review artifact.
+11. Optional composition demo: let `pr-review` call `test-runner` and link the
+    child task artifact from the parent review.
 
 ## Execution Order
 
@@ -257,4 +349,6 @@ Do not spend time on harness install guidance.
 7. Land `Mesh-LLM/mesh-llm#725`.
 8. Rebase and land `Mesh-LLM/mesh-llm#702`.
 9. Build and validate two-node remote discovery/routing.
-10. Run the final no-console demo end to end.
+10. Add parent/child task metadata for agent-to-agent delegation.
+11. Add local scheduled autonomous trigger support.
+12. Run the final no-console demo end to end.
