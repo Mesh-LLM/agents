@@ -655,6 +655,15 @@ fn task_artifacts(task_paths: &TaskRuntimePaths, output: &str) -> Result<Vec<Art
     {
         artifacts.insert(0, text_artifact("summary.md", output.to_string()));
     }
+    if !artifacts
+        .iter()
+        .any(|artifact| artifact.artifact_id == "findings.json")
+    {
+        artifacts.push(data_artifact(
+            "findings.json",
+            fallback_findings_json(output),
+        ));
+    }
     Ok(artifacts)
 }
 
@@ -720,6 +729,17 @@ fn data_artifact(artifact_id: impl Into<String>, value: Value) -> Artifact {
         )])),
         extensions: None,
     }
+}
+
+fn fallback_findings_json(output: &str) -> Value {
+    json!({
+        "schema_version": 1,
+        "target": null,
+        "status": "completed",
+        "summary": output.trim(),
+        "findings": [],
+        "residual_risk": "The ACP harness did not write findings.json; review the summary.md artifact for details.",
+    })
 }
 
 fn media_type_for(path: &str) -> &'static str {
@@ -1030,7 +1050,7 @@ mod tests {
     }
 
     #[test]
-    fn completed_task_adds_summary_artifact_when_harness_writes_none() {
+    fn completed_task_adds_default_artifacts_when_harness_writes_none() {
         let root = temp_root("fallback-artifact");
         let artifacts_dir = root.join("artifacts");
         std::fs::create_dir_all(&artifacts_dir).unwrap();
@@ -1048,9 +1068,13 @@ mod tests {
         let artifacts = task
             .artifacts
             .expect("completed task should have artifacts");
-        assert_eq!(artifacts.len(), 1);
+        assert_eq!(artifacts.len(), 2);
         assert_eq!(artifacts[0].artifact_id, "summary.md");
         assert_eq!(artifacts[0].parts[0].as_text(), Some("review output"));
+        assert_eq!(artifacts[1].artifact_id, "findings.json");
+        let findings = serde_json::to_value(&artifacts[1].parts[0]).unwrap();
+        assert_eq!(findings["data"]["schema_version"], 1);
+        assert_eq!(findings["data"]["findings"], json!([]));
     }
 
     #[tokio::test]

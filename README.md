@@ -579,6 +579,17 @@ cargo build --workspace --locked
 The live OpenCode ACP tests are ignored by default because they require an
 installed and configured OpenCode ACP agent.
 
+Run the private two-node PR review smoke before a demo:
+
+```bash
+MESH_LLM_BIN=/path/to/mesh-llm ./scripts/e2e-private-mesh-pr-review.sh
+```
+
+The script starts two isolated private mesh nodes, advertises
+`examples/pr-review` from node A, discovers it from node B through
+`http://127.0.0.1:<console>/mcp`, sends a remote A2A task, and verifies
+`summary.md` plus `findings.json` artifacts.
+
 ### Adding Runtime Support
 
 Runtime support is deliberately split between the public Agent Card and the

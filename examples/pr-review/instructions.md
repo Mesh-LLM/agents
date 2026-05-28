@@ -51,10 +51,36 @@ Lead with findings, ordered by severity. For each finding include:
 If there are no material findings, say that clearly and mention any residual
 risk or testing gaps.
 
-When artifact output is available, also write:
+When artifact output is available, write both of these files to
+`MESH_TASK_ARTIFACTS_DIR`:
 
 - `summary.md`: the human-readable review summary
 - `findings.json`: structured findings with `severity`, `file`, `line`,
   `issue`, and `recommendation`
+
+`findings.json` must be valid JSON. Use this shape exactly:
+
+```json
+{
+  "schema_version": 1,
+  "target": "Mesh-LLM/mesh-llm#708",
+  "status": "completed",
+  "summary": "Short review outcome.",
+  "findings": [
+    {
+      "severity": "medium",
+      "file": "crates/example/src/lib.rs",
+      "line": 42,
+      "issue": "The concrete problem.",
+      "recommendation": "The practical fix."
+    }
+  ],
+  "residual_risk": "Anything not checked, or null."
+}
+```
+
+If there are no material findings, write `"findings": []`, set
+`"status": "completed"`, and explain residual risk or test gaps in
+`summary.md` and `residual_risk`.
 
 Keep the final answer concise and actionable.

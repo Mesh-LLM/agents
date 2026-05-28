@@ -9,7 +9,7 @@ use axum::body::Body;
 use http_body_util::BodyExt;
 use mesh_agents_a2a::{
     agent_task_store_path, AgentDefinition, AgentRegistry, Artifact, JsonRpcId, JsonRpcRequest,
-    JsonRpcResponse, LocalAgentService, PersistentTaskStore, QueueMode, Task, TaskStore,
+    JsonRpcResponse, LocalAgentService, Part, PersistentTaskStore, QueueMode, Task, TaskStore,
 };
 use mesh_agents_acp_bridge::AcpAgentExecutor;
 use rmcp::model::{
@@ -219,9 +219,12 @@ impl LocalA2aTools {
     async fn view_data_artifact(&self, args: Map<String, Value>) -> Result<Value> {
         let (agent_id, task_id, artifact_id) = artifact_args(&args)?;
         let artifact = self.load_artifact(agent_id, task_id, artifact_id).await?;
+        let data = artifact_data(&artifact)?;
         Ok(json!({
             "agent_id": agent_id,
             "task_id": task_id,
+            "artifact_id": artifact.artifact_id,
+            "data": data,
             "artifact": artifact,
         }))
     }
@@ -318,6 +321,19 @@ fn decode_remote_task(value: Value) -> Result<Task> {
         return serde_json::from_value(task.clone()).context("failed to decode wrapped task");
     }
     serde_json::from_value(value).context("failed to decode task")
+}
+
+fn artifact_data(artifact: &Artifact) -> Result<Value> {
+    artifact
+        .parts
+        .iter()
+        .find_map(part_data)
+        .with_context(|| format!("artifact `{}` has no data parts", artifact.artifact_id))
+}
+
+fn part_data(part: &Part) -> Option<Value> {
+    let value = serde_json::to_value(part).ok()?;
+    value.get("data").cloned()
 }
 
 #[derive(Clone, Debug, Default)]

@@ -8,7 +8,7 @@ use axum::body::Body;
 use http_body_util::BodyExt;
 use mesh_agents_a2a::{
     jsonrpc_methods, AgentDefinition, AgentRegistry, Artifact, JsonRpcId, JsonRpcRequest,
-    JsonRpcResponse, LocalAgentService, QueueMode, Task, TaskStore,
+    JsonRpcResponse, LocalAgentService, Part, QueueMode, Task, TaskStore,
 };
 use mesh_agents_acp_bridge::AcpAgentExecutor;
 use mesh_llm_plugin::{
@@ -152,9 +152,13 @@ fn build_plugin_with_command(
             mesh_llm_plugin::mcp::tool("get_agents")
                 .description("List local and mesh-discovered A2A agents.")
                 .input::<EmptyArgs>()
-                .handle(move |_args, _context| {
+                .handle(move |_args, context| {
                     let state = get_agents_state.clone();
-                    Box::pin(async move { plugin_get_agents(&state).map_err(Into::into) })
+                    Box::pin(async move {
+                        plugin_get_agents(&state, context)
+                            .await
+                            .map_err(Into::into)
+                    })
                 }),
             mesh_llm_plugin::mcp::tool("get_agent")
                 .description("Get one local or mesh-discovered A2A Agent Card.")
@@ -339,7 +343,8 @@ async fn handle_channel_message(
     }
 }
 
-fn plugin_get_agents(state: &PluginState) -> Result<Value> {
+async fn plugin_get_agents(state: &PluginState, context: &mut PluginContext<'_>) -> Result<Value> {
+    advertise_local_agents(state, context).await?;
     let mut agents = local_agent_summaries(&state.agents_dir)?;
     agents.extend(remote_agent_summaries(&state.data_dir)?);
     Ok(json!({ "agents": agents }))
@@ -497,9 +502,12 @@ async fn plugin_view_data_artifact(
     artifact_id: &str,
 ) -> Result<Value> {
     let artifact = plugin_load_artifact(state, agent_id, task_id, artifact_id).await?;
+    let data = artifact_data(&artifact)?;
     Ok(json!({
         "agent_id": agent_id,
         "task_id": task_id,
+        "artifact_id": artifact.artifact_id,
+        "data": data,
         "artifact": artifact,
     }))
 }
@@ -541,6 +549,20 @@ fn decode_task_value(value: Value) -> Result<Task> {
         return serde_json::from_value(task.clone()).context("failed to decode wrapped task");
     }
     serde_json::from_value(value).context("failed to decode task")
+}
+
+fn artifact_data(artifact: &Artifact) -> Result<Value> {
+    let data = artifact
+        .parts
+        .iter()
+        .find_map(part_data)
+        .with_context(|| format!("artifact `{}` has no data parts", artifact.artifact_id))?;
+    Ok(data)
+}
+
+fn part_data(part: &Part) -> Option<Value> {
+    let value = serde_json::to_value(part).ok()?;
+    value.get("data").cloned()
 }
 
 fn pending_remote_task_result(agent_id: &str, correlation_id: &str, peer_id: &str) -> Value {
