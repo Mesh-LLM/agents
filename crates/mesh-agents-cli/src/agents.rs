@@ -1,5 +1,7 @@
 use anyhow::{bail, Context, Result};
 use mesh_agents_a2a::{AgentDefinition, AgentRegistry};
+use serde::Serialize;
+use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -18,9 +20,11 @@ pub(crate) fn dispatch_agents_command(command: &AgentsCommand) -> Result<()> {
             dir,
             force,
         } => init_agent(agent_id, *runtime, dir.as_deref(), *force),
-        AgentsCommand::Validate { agent_id, dir } => {
-            validate_agents(agent_id.as_deref(), dir.as_deref())
-        }
+        AgentsCommand::Validate {
+            agent_id,
+            dir,
+            json,
+        } => validate_agents(agent_id.as_deref(), dir.as_deref(), *json),
         AgentsCommand::Show {
             agent_id,
             dir,
@@ -99,11 +103,26 @@ fn init_agent(
     Ok(())
 }
 
-fn validate_agents(agent_id: Option<&str>, dir: Option<&Path>) -> Result<()> {
+fn validate_agents(agent_id: Option<&str>, dir: Option<&Path>, json: bool) -> Result<()> {
     let registry = load_registry(dir)?;
     if let Some(agent_id) = agent_id {
-        require_agent(&registry, agent_id)?;
+        let agent = require_agent(&registry, agent_id)?;
+        if json {
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&validation_report([agent]))?
+            );
+            return Ok(());
+        }
         println!("agent {agent_id} is valid");
+        return Ok(());
+    }
+
+    if json {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&validation_report(registry.agents()))?
+        );
         return Ok(());
     }
 
@@ -194,6 +213,91 @@ fn agent_json_summary(agent: &AgentDefinition) -> serde_json::Value {
         "agent_card": agent.card_path,
         "runtime_config": agent.runtime_path,
     })
+}
+
+fn validation_report<'a>(
+    agents: impl IntoIterator<Item = &'a AgentDefinition>,
+) -> AgentValidationReport {
+    let agents = agents.into_iter().collect::<Vec<_>>();
+    let mut runtimes = BTreeMap::new();
+    for agent in &agents {
+        *runtimes
+            .entry(runtime_label(agent).to_string())
+            .or_default() += 1;
+    }
+    AgentValidationReport {
+        status: "ok",
+        total: agents.len(),
+        enabled: agents.iter().filter(|agent| agent.runtime.enabled).count(),
+        public: agents
+            .iter()
+            .filter(|agent| {
+                matches!(
+                    &agent.runtime.visibility,
+                    mesh_agents_a2a::Visibility::Public
+                )
+            })
+            .count(),
+        advertised_on_mesh: agents
+            .iter()
+            .filter(|agent| agent.runtime.policy.advertise_on_mesh)
+            .count(),
+        runtimes,
+        agents: agents.into_iter().map(agent_validation_row).collect(),
+    }
+}
+
+fn agent_validation_row(agent: &AgentDefinition) -> AgentValidationRow {
+    AgentValidationRow {
+        id: agent.id.clone(),
+        name: agent.card.name.clone(),
+        enabled: agent.runtime.enabled,
+        visibility: visibility_label(agent).to_string(),
+        runtime: runtime_label(agent).to_string(),
+        max_concurrent_tasks: agent.runtime.runtime.max_concurrent_tasks,
+        advertise_on_mesh: agent.runtime.policy.advertise_on_mesh,
+        public_mesh: agent.runtime.policy.public_mesh,
+    }
+}
+
+fn runtime_label(agent: &AgentDefinition) -> &'static str {
+    match &agent.runtime.runtime.kind {
+        mesh_agents_a2a::RuntimeKind::Opencode => "opencode",
+        mesh_agents_a2a::RuntimeKind::Goose => "goose",
+        mesh_agents_a2a::RuntimeKind::Pi => "pi",
+        mesh_agents_a2a::RuntimeKind::Acp => "acp",
+        mesh_agents_a2a::RuntimeKind::Remote => "remote",
+    }
+}
+
+fn visibility_label(agent: &AgentDefinition) -> &'static str {
+    match &agent.runtime.visibility {
+        mesh_agents_a2a::Visibility::Private => "private",
+        mesh_agents_a2a::Visibility::Public => "public",
+    }
+}
+
+#[derive(Serialize)]
+struct AgentValidationReport {
+    status: &'static str,
+    total: usize,
+    enabled: usize,
+    public: usize,
+    advertised_on_mesh: usize,
+    runtimes: BTreeMap<String, usize>,
+    agents: Vec<AgentValidationRow>,
+}
+
+#[derive(Serialize)]
+struct AgentValidationRow {
+    id: String,
+    name: String,
+    enabled: bool,
+    visibility: String,
+    runtime: String,
+    max_concurrent_tasks: usize,
+    advertise_on_mesh: bool,
+    public_mesh: bool,
 }
 
 fn write_agent_card(agent_dir: &Path, agent_id: &str) -> Result<()> {
@@ -336,5 +440,22 @@ mod tests {
         assert!(agent.runtime.enabled);
         assert_eq!(agent.runtime.runtime.max_concurrent_tasks, 1);
         assert!(agent.dir.join("instructions.md").is_file());
+    }
+
+    #[test]
+    fn validation_report_counts_runtime_and_policy() {
+        let root = temp_root("report");
+        init_agent("pr-review", AgentRuntimeArg::Opencode, Some(&root), false).unwrap();
+        init_agent("explicit-acp", AgentRuntimeArg::Acp, Some(&root), false).unwrap();
+
+        let registry = AgentRegistry::load_from_dir(&root).unwrap();
+        let report = validation_report(registry.agents());
+
+        assert_eq!(report.status, "ok");
+        assert_eq!(report.total, 2);
+        assert_eq!(report.enabled, 2);
+        assert_eq!(report.runtimes["opencode"], 1);
+        assert_eq!(report.runtimes["acp"], 1);
+        assert!(report.agents.iter().all(|agent| !agent.advertise_on_mesh));
     }
 }

@@ -451,6 +451,7 @@ Useful authoring commands:
 mesh-llm agents list
 mesh-llm agents init <agent-id> --runtime opencode
 mesh-llm agents validate [agent-id]
+mesh-llm agents validate [agent-id] --json
 mesh-llm agents show <agent-id>
 mesh-llm agents enable <agent-id>
 mesh-llm agents disable <agent-id>
@@ -460,6 +461,12 @@ mesh-llm agents disable <agent-id>
 `pr-review`, it creates a valid card skeleton, runtime policy, and instructions
 file. Edit `agent-card.json` against the official A2A Agent Card docs, then run
 `mesh-llm agents validate pr-review`.
+
+Validation checks the public Agent Card and private runtime policy together.
+It catches malformed cards, empty required fields, missing instruction files,
+explicit ACP runtimes without a command, and path workspaces without a path.
+Use `--json` in CI or scripts when you need a stable summary of enabled agents,
+runtime types, and mesh advertisement policy.
 
 ## Discovering Agents
 

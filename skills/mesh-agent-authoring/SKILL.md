@@ -29,6 +29,12 @@ mesh-llm agents validate pr-review
 mesh-llm agents show pr-review
 ```
 
+Use JSON validation for automation or CI-facing checks:
+
+```bash
+mesh-llm agents validate pr-review --json
+```
+
 ## Agent Card
 
 The Agent Card is the public contract. It should describe what the agent does,
@@ -88,4 +94,6 @@ Substitutions happen when a task starts. Useful variables include:
   fixed checkout.
 - Keep `policy.advertise_on_mesh = false` and `policy.public_mesh = false`
   until the user intentionally wants discovery by other nodes.
-- Validate the agent definition before telling the user it is ready.
+- Validate the agent definition before telling the user it is ready. Validation
+  should catch malformed Agent Cards, missing instruction files, ACP runtimes
+  without a command, and path workspaces without a path.

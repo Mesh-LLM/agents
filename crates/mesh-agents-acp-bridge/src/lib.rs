@@ -600,14 +600,14 @@ fn completed_task_from_paths(
     ctx: mesh_agents_a2a::ExecutorContext,
     output: String,
     task_paths: &TaskRuntimePaths,
-) -> std::result::Result<Task, TaskBuildError> {
+) -> std::result::Result<Task, Box<TaskBuildError>> {
     let artifacts = match task_artifacts(task_paths, &output) {
         Ok(artifacts) => artifacts,
         Err(error) => {
-            return Err(TaskBuildError {
+            return Err(Box::new(TaskBuildError {
                 ctx,
                 message: error.to_string(),
-            });
+            }));
         }
     };
     Ok(completed_task(ctx, output, artifacts))
