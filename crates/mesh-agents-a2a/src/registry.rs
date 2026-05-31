@@ -90,6 +90,7 @@ impl AgentDefinition {
         let card: AgentCard = read_json(&card_path)?;
         let mut runtime: AgentRuntimeConfig = read_toml(&runtime_path)?;
         runtime.normalize_relative_paths(&dir);
+        validate_agent_definition(&id, &card, &runtime)?;
 
         Ok(Self {
             id,
@@ -391,6 +392,152 @@ fn read_toml<T: serde::de::DeserializeOwned>(path: &Path) -> Result<T> {
     toml::from_str(&raw).with_context(|| format!("failed to parse {}", path.display()))
 }
 
+fn validate_agent_definition(
+    agent_id: &str,
+    card: &AgentCard,
+    runtime: &AgentRuntimeConfig,
+) -> Result<()> {
+    validate_agent_card(agent_id, card)?;
+    validate_runtime_config(agent_id, runtime)
+}
+
+fn validate_agent_card(agent_id: &str, card: &AgentCard) -> Result<()> {
+    validate_required(&card.name, &format!("agent {agent_id} card.name"))?;
+    validate_required(
+        &card.description,
+        &format!("agent {agent_id} card.description"),
+    )?;
+    validate_required(&card.version, &format!("agent {agent_id} card.version"))?;
+    validate_agent_interfaces(agent_id, &card.supported_interfaces)?;
+    validate_string_list(
+        &card.default_input_modes,
+        &format!("agent {agent_id} card.defaultInputModes"),
+    )?;
+    validate_string_list(
+        &card.default_output_modes,
+        &format!("agent {agent_id} card.defaultOutputModes"),
+    )?;
+    for (index, skill) in card.skills.iter().enumerate() {
+        let path = format!("agent {agent_id} card.skills[{index}]");
+        validate_required(&skill.id, &format!("{path}.id"))?;
+        validate_required(&skill.name, &format!("{path}.name"))?;
+        validate_required(&skill.description, &format!("{path}.description"))?;
+        validate_string_list(&skill.tags, &format!("{path}.tags"))?;
+    }
+    Ok(())
+}
+
+fn validate_agent_interfaces(agent_id: &str, interfaces: &[a2a::AgentInterface]) -> Result<()> {
+    if interfaces.is_empty() {
+        bail!("agent {agent_id} card.supportedInterfaces must not be empty");
+    }
+    for (index, interface) in interfaces.iter().enumerate() {
+        let path = format!("agent {agent_id} card.supportedInterfaces[{index}]");
+        validate_required(&interface.url, &format!("{path}.url"))?;
+        validate_required(
+            &interface.protocol_binding,
+            &format!("{path}.protocolBinding"),
+        )?;
+        validate_required(
+            &interface.protocol_version,
+            &format!("{path}.protocolVersion"),
+        )?;
+    }
+    Ok(())
+}
+
+fn validate_runtime_config(agent_id: &str, config: &AgentRuntimeConfig) -> Result<()> {
+    validate_runtime_command(agent_id, &config.runtime)?;
+    validate_workspace(agent_id, &config.runtime.workspace)?;
+    validate_instructions(agent_id, config.instructions.as_ref())?;
+    validate_tools(agent_id, &config.tools)?;
+    if let Some(auth) = &config.auth {
+        validate_optional_non_empty(
+            auth.bearer_token_env.as_deref(),
+            &format!("agent {agent_id} auth.bearer_token_env"),
+        )?;
+    }
+    if config.runtime.max_concurrent_tasks == 0 {
+        bail!("agent {agent_id} runtime.max_concurrent_tasks must be at least 1");
+    }
+    Ok(())
+}
+
+fn validate_runtime_command(agent_id: &str, runtime: &RuntimeConfig) -> Result<()> {
+    match runtime.kind {
+        RuntimeKind::Acp => {
+            validate_required_option(
+                runtime.command.as_deref(),
+                &format!("agent {agent_id} runtime.command"),
+            )?;
+        }
+        RuntimeKind::Opencode | RuntimeKind::Goose | RuntimeKind::Pi | RuntimeKind::Remote => {
+            validate_optional_non_empty(
+                runtime.command.as_deref(),
+                &format!("agent {agent_id} runtime.command"),
+            )?;
+        }
+    }
+    validate_string_list(&runtime.args, &format!("agent {agent_id} runtime.args"))?;
+    for (key, value) in &runtime.env {
+        validate_required(key, &format!("agent {agent_id} runtime.env key"))?;
+        validate_required(value, &format!("agent {agent_id} runtime.env.{key}"))?;
+    }
+    Ok(())
+}
+
+fn validate_workspace(agent_id: &str, workspace: &WorkspaceConfig) -> Result<()> {
+    if matches!(workspace.mode, WorkspaceMode::Path) {
+        let path = workspace
+            .path
+            .as_ref()
+            .filter(|path| !path.as_os_str().is_empty())
+            .with_context(|| format!("agent {agent_id} runtime.workspace.path is required"))?;
+        if path.as_os_str().is_empty() {
+            bail!("agent {agent_id} runtime.workspace.path must not be empty");
+        }
+    }
+    validate_optional_non_empty(
+        workspace.prefix.as_deref(),
+        &format!("agent {agent_id} runtime.workspace.prefix"),
+    )
+}
+
+fn validate_instructions(agent_id: &str, instructions: Option<&InstructionsConfig>) -> Result<()> {
+    let Some(instructions) = instructions else {
+        return Ok(());
+    };
+    let Some(path) = &instructions.file else {
+        return Ok(());
+    };
+    if path.as_os_str().is_empty() {
+        bail!("agent {agent_id} instructions.file must not be empty");
+    }
+    if !path.is_file() {
+        bail!(
+            "agent {agent_id} instructions.file {} does not exist",
+            path.display()
+        );
+    }
+    Ok(())
+}
+
+fn validate_tools(agent_id: &str, tools: &ToolsConfig) -> Result<()> {
+    validate_string_list(
+        &tools.mesh.available_tools,
+        &format!("agent {agent_id} tools.mesh.available_tools"),
+    )?;
+    for (index, tool) in tools.extra.iter().enumerate() {
+        let path = format!("agent {agent_id} tools.extra[{index}]");
+        validate_required(&tool.name, &format!("{path}.name"))?;
+        validate_optional_non_empty(tool.command.as_deref(), &format!("{path}.command"))?;
+        validate_string_list(&tool.args, &format!("{path}.args"))?;
+        validate_string_list(&tool.env_keys, &format!("{path}.env_keys"))?;
+        validate_string_list(&tool.available_tools, &format!("{path}.available_tools"))?;
+    }
+    Ok(())
+}
+
 fn validate_agent_id(agent_id: &str) -> Result<()> {
     if agent_id.is_empty() {
         bail!("agent id cannot be empty");
@@ -400,6 +547,34 @@ fn validate_agent_id(agent_id: &str) -> Result<()> {
         .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_'))
     {
         bail!("agent id {agent_id:?} must contain only ASCII letters, digits, '-' or '_'");
+    }
+    Ok(())
+}
+
+fn validate_required(value: &str, path: &str) -> Result<()> {
+    if value.trim().is_empty() {
+        bail!("{path} must not be empty");
+    }
+    Ok(())
+}
+
+fn validate_required_option(value: Option<&str>, path: &str) -> Result<()> {
+    match value {
+        Some(value) => validate_required(value, path),
+        None => bail!("{path} is required"),
+    }
+}
+
+fn validate_optional_non_empty(value: Option<&str>, path: &str) -> Result<()> {
+    if let Some(value) = value {
+        validate_required(value, path)?;
+    }
+    Ok(())
+}
+
+fn validate_string_list(values: &[String], path: &str) -> Result<()> {
+    for (index, value) in values.iter().enumerate() {
+        validate_required(value, &format!("{path}[{index}]"))?;
     }
     Ok(())
 }
@@ -466,6 +641,33 @@ command = "github-mcp-server"
         agent_dir
     }
 
+    fn write_agent_without_instructions(root: &Path, id: &str, runtime: &str) -> PathBuf {
+        let agent_dir = root.join(id);
+        fs::create_dir_all(&agent_dir).expect("create test agent directory");
+        fs::write(
+            agent_dir.join(AGENT_CARD_FILE),
+            r#"{
+              "name": "Test Agent",
+              "description": "A test agent.",
+              "version": "1.0.0",
+              "supportedInterfaces": [
+                {
+                  "url": "http://localhost:3131/a2a/agents/test",
+                  "protocolBinding": "JSONRPC",
+                  "protocolVersion": "1.0"
+                }
+              ],
+              "capabilities": { "streaming": true },
+              "defaultInputModes": ["text/plain"],
+              "defaultOutputModes": ["text/markdown"],
+              "skills": []
+            }"#,
+        )
+        .expect("write test agent card");
+        fs::write(agent_dir.join(RUNTIME_FILE), runtime).expect("write test runtime config");
+        agent_dir
+    }
+
     #[test]
     fn loads_directory_agents() {
         let root = temp_root("loads");
@@ -500,5 +702,129 @@ command = "github-mcp-server"
             .to_string();
 
         assert!(error.contains("loose Agent Card files are not supported"));
+    }
+
+    #[test]
+    fn rejects_acp_runtime_without_command() {
+        let root = temp_root("acp-command");
+        write_agent_without_instructions(
+            &root,
+            "pr-review",
+            r#"
+enabled = true
+visibility = "private"
+
+[runtime]
+type = "acp"
+max_concurrent_tasks = 1
+
+[runtime.workspace]
+mode = "temp_per_task"
+"#,
+        );
+
+        let error = AgentRegistry::load_from_dir(&root)
+            .expect_err("ACP runtime without command should be rejected")
+            .to_string();
+
+        assert!(error.contains("runtime.command is required"), "{error}");
+    }
+
+    #[test]
+    fn rejects_path_workspace_without_path() {
+        let root = temp_root("workspace-path");
+        write_agent_without_instructions(
+            &root,
+            "pr-review",
+            r#"
+enabled = true
+visibility = "private"
+
+[runtime]
+type = "opencode"
+max_concurrent_tasks = 1
+
+[runtime.workspace]
+mode = "path"
+"#,
+        );
+
+        let error = AgentRegistry::load_from_dir(&root)
+            .expect_err("path workspace without path should be rejected")
+            .to_string();
+
+        assert!(
+            error.contains("runtime.workspace.path is required"),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn rejects_missing_instruction_file() {
+        let root = temp_root("instructions");
+        write_agent_without_instructions(
+            &root,
+            "pr-review",
+            r#"
+enabled = true
+visibility = "private"
+
+[runtime]
+type = "opencode"
+max_concurrent_tasks = 1
+
+[runtime.workspace]
+mode = "temp_per_task"
+
+[instructions]
+file = "missing.md"
+"#,
+        );
+
+        let error = AgentRegistry::load_from_dir(&root)
+            .expect_err("missing instructions file should be rejected")
+            .to_string();
+
+        assert!(error.contains("instructions.file"), "{error}");
+        assert!(error.contains("missing.md"), "{error}");
+    }
+
+    #[test]
+    fn rejects_empty_card_interfaces() {
+        let root = temp_root("card-interfaces");
+        let agent_dir = root.join("pr-review");
+        fs::create_dir_all(&agent_dir).expect("create test agent directory");
+        fs::write(
+            agent_dir.join(AGENT_CARD_FILE),
+            r#"{
+              "name": "Test Agent",
+              "description": "A test agent.",
+              "version": "1.0.0",
+              "supportedInterfaces": [],
+              "capabilities": { "streaming": true },
+              "defaultInputModes": ["text/plain"],
+              "defaultOutputModes": ["text/markdown"],
+              "skills": []
+            }"#,
+        )
+        .expect("write invalid card");
+        fs::write(
+            agent_dir.join(RUNTIME_FILE),
+            r#"
+enabled = true
+visibility = "private"
+
+[runtime]
+type = "opencode"
+max_concurrent_tasks = 1
+"#,
+        )
+        .expect("write runtime config");
+
+        let error = AgentRegistry::load_from_dir(&root)
+            .expect_err("card without interfaces should be rejected")
+            .to_string();
+
+        assert!(error.contains("supportedInterfaces"), "{error}");
     }
 }

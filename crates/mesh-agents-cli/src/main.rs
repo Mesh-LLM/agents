@@ -66,6 +66,9 @@ pub(crate) enum AgentsCommand {
         /// Agents directory. Defaults to ~/.mesh-llm/agents.
         #[arg(long)]
         dir: Option<PathBuf>,
+        /// Print machine-readable JSON output.
+        #[arg(long)]
+        json: bool,
     },
     /// Show one local agent definition.
     Show {

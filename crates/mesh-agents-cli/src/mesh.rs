@@ -384,11 +384,17 @@ public_mesh = false
 
         assert_eq!(cache.tasks.len(), 1);
         assert_eq!(
-            cache.get("pr-review", "remote-1").unwrap().task_id,
+            cache
+                .get("pr-review", "remote-1")
+                .expect("correlation id should resolve to completed task")
+                .task_id,
             "task-1"
         );
         assert_eq!(
-            cache.get("pr-review", "task-1").unwrap().correlation_id,
+            cache
+                .get("pr-review", "task-1")
+                .expect("task id should resolve to completed task")
+                .correlation_id,
             "remote-1"
         );
     }
